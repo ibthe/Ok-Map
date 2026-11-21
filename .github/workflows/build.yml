@@ -1,0 +1,135 @@
+name: Build Ok Map APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      osm_url:
+        description: "Optional: direct link to a .osm.pbf of Georgia (country) if automatic download fails"
+        required: false
+        default: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Map data (tiles, search index, relief) is rebuilt only when the tile tools change.
+      # Fonts and the style are NOT part of this cache: they are cheap and are rebuilt on every run.
+      # restore-keys also picks up the cache of older runs, so changing fonts/design never
+      # triggers the 30-60 minute tile build again.
+      - name: Cache map data
+        id: mapdata
+        uses: actions/cache@v4
+        with:
+          path: |
+            app/src/main/assets/map.mbtiles
+            app/src/main/assets/places.db
+            app/src/main/assets/relief.mbtiles
+            app/src/main/assets/places.stamp
+          # build_places.py / reference_places.json are NOT in the key: they only rebuild the search index
+          # (see "Decide what has to be rebuilt"), the 30-60 min tile build stays cached
+          key: mapdata-v3-${{ hashFiles('tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py', 'tools/build_relief.py') }}
+          restore-keys: |
+            mapdata-v3-
+            mapdata-v2-
+
+      # decided once, before anything is built (a file check per step would change mid-run)
+      - name: Decide what has to be rebuilt
+        id: need
+        run: |
+          mkdir -p app/src/main/assets
+          [ -s app/src/main/assets/map.mbtiles ] || { echo "tiles=true" >> "$GITHUB_OUTPUT"; echo "places=true" >> "$GITHUB_OUTPUT"; }
+          [ -s app/src/main/assets/places.db ] || echo "places=true" >> "$GITHUB_OUTPUT"
+          PH=$(cat tools/build_places.py tools/mvt.py tools/reference_places.json | sha1sum | cut -d' ' -f1)
+          echo "$PH" > /tmp/places.stamp
+          [ "$(cat app/src/main/assets/places.stamp 2>/dev/null)" = "$PH" ] || echo "places=true" >> "$GITHUB_OUTPUT"
+          [ -s app/src/main/assets/relief.mbtiles ] || echo "relief=true" >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+          ls -lh app/src/main/assets || true
+
+      - name: Download OSM extract of Georgia (Geofabrik)
+        if: steps.need.outputs.tiles == 'true'
+        env:
+          OSM_URL: ${{ github.event.inputs.osm_url }}
+        run: |
+          mkdir -p data
+          python tools/fetch_osm.py data/region.osm.pbf
+          ls -lh data/region.osm.pbf
+
+      - name: Build vector tiles with Planetiler (OpenMapTiles schema)
+        if: steps.need.outputs.tiles == 'true'
+        run: |
+          curl -L --fail --retry 3 -o data/planetiler.jar \
+            https://github.com/onthegomap/planetiler/releases/latest/download/planetiler.jar
+          mkdir -p app/src/main/assets
+          java -Xmx4g -jar data/planetiler.jar \
+            --osm-path=data/region.osm.pbf \
+            --download \
+            --output=app/src/main/assets/map.mbtiles \
+            --force \
+            --maxzoom=14
+          ls -lh app/src/main/assets/map.mbtiles
+
+      - name: Normalize MBTiles and verify tile content (layers, ka/ru/en names)
+        if: steps.need.outputs.tiles == 'true'
+        working-directory: tools
+        run: |
+          python finalize_tiles.py ../app/src/main/assets/map.mbtiles
+          python check_tiles.py ../app/src/main/assets/map.mbtiles
+
+      - name: Build offline search index
+        if: steps.need.outputs.places == 'true'
+        working-directory: tools
+        run: |
+          python build_places.py ../app/src/main/assets/map.mbtiles ../app/src/main/assets/places.db
+          cp /tmp/places.stamp ../app/src/main/assets/places.stamp
+
+      - name: Build relief tiles (hillshade + elevation readout)
+        if: steps.need.outputs.relief == 'true'
+        continue-on-error: true
+        working-directory: tools
+        run: python build_relief.py ../app/src/main/assets/relief.mbtiles
+
+      - name: Build label fonts (Latin + Cyrillic + Georgian)
+        run: |
+          sudo apt-get update -qq || true
+          sudo apt-get install -y -qq fonts-noto-core fonts-dejavu-core || true
+          python -m pip install --quiet pillow numpy scipy fonttools
+          rm -rf app/src/main/assets/glyphs
+          python tools/build_glyphs.py app/src/main/assets/glyphs/NotoSans
+
+      - name: Generate map styles (5 colour themes x day/night)
+        run: |
+          rm -f app/src/main/assets/style*.json
+          for t in forest ocean sand dusk graphite; do
+            python tools/gen_style.py app/src/main/assets/style_$t.json --theme $t
+            python tools/gen_style.py app/src/main/assets/style_${t}_dark.json --dark --theme $t
+          done
+          python tools/themes.py
+          ls -l app/src/main/assets/style_*.json
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Build Ok Map APK
+        run: gradle --no-daemon -Pvcode=${{ github.run_number }} :app:assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ok-map-apk
+          path: app/build/outputs/apk/debug/*.apk
+          compression-level: 0

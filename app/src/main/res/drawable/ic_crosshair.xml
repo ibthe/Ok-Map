@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="44dp"
+    android:height="44dp"
+    android:viewportWidth="44"
+    android:viewportHeight="44">
+    <path android:strokeColor="?attr/gCrosshairHalo" android:strokeWidth="5" android:strokeLineCap="round"
+        android:pathData="M22,5V13M22,31V39M5,22H13M31,22H39" />
+    <path android:strokeColor="?attr/gCrosshairHalo" android:strokeWidth="5"
+        android:pathData="M22,22m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+    <path android:strokeColor="?attr/gCrosshair" android:strokeWidth="2.2" android:strokeLineCap="round"
+        android:pathData="M22,5V13M22,31V39M5,22H13M31,22H39" />
+    <path android:strokeColor="?attr/gCrosshair" android:strokeWidth="2.2"
+        android:pathData="M22,22m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+</vector>

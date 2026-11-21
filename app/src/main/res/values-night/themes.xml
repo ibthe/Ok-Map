@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.OkMap.Forest" parent="Base.Theme.OkMap">
+        <item name="gSurface">#0F1512</item>
+        <item name="gPanel">#EB151D19</item>
+        <item name="gStroke">#24FFFFFF</item>
+        <item name="gFab">#F5151D19</item>
+        <item name="gDialog">#1B2520</item>
+        <item name="gTextPrimary">#E3ECE6</item>
+        <item name="gTextSecondary">#A3B5AA</item>
+        <item name="gHint">#74857A</item>
+        <item name="gIcon">#D8E5DC</item>
+        <item name="gAccent">#7FD1A8</item>
+        <item name="gOnAccent">#06281A</item>
+        <item name="gAccentContainer">#1F4A37</item>
+        <item name="gOnAccentContainer">#D6EBDD</item>
+        <item name="gCrosshair">#FF7088</item>
+        <item name="gCrosshairHalo">#CC0F1512</item>
+        <item name="colorPrimary">#7FD1A8</item>
+        <item name="colorOnPrimary">#06281A</item>
+        <item name="colorPrimaryContainer">#1F4A37</item>
+        <item name="colorOnPrimaryContainer">#D6EBDD</item>
+        <item name="colorSecondaryContainer">#1F4A37</item>
+        <item name="colorOnSecondaryContainer">#D6EBDD</item>
+        <item name="colorSurface">#0F1512</item>
+        <item name="colorOnSurface">#E3ECE6</item>
+        <item name="colorOnSurfaceVariant">#A3B5AA</item>
+        <item name="colorSurfaceContainer">#1B2520</item>
+        <item name="colorSurfaceContainerHigh">#1B2520</item>
+        <item name="colorOutline">#74857A</item>
+        <item name="android:statusBarColor">#0F1512</item>
+        <item name="android:navigationBarColor">#0F1512</item>
+        <item name="android:windowBackground">#0F1512</item>
+        <item name="android:windowLightStatusBar">@bool/light_bars</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
+    </style>
+    <style name="Theme.OkMap.Ocean" parent="Base.Theme.OkMap">
+        <item name="gSurface">#0D141A</item>
+        <item name="gPanel">#EB131C24</item>
+        <item name="gStroke">#24FFFFFF</item>
+        <item name="gFab">#F5131C24</item>
+        <item name="gDialog">#19232D</item>
+        <item name="gTextPrimary">#E1EBF3</item>
+        <item name="gTextSecondary">#9FB2C2</item>
+        <item name="gHint">#71859A</item>
+        <item name="gIcon">#D5E3EE</item>
+        <item name="gAccent">#7CC0EA</item>
+        <item name="gOnAccent">#052A42</item>
+        <item name="gAccentContainer">#1B4B69</item>
+        <item name="gOnAccentContainer">#D3E8F5</item>
+        <item name="gCrosshair">#FF7088</item>
+        <item name="gCrosshairHalo">#CC0D141A</item>
+        <item name="colorPrimary">#7CC0EA</item>
+        <item name="colorOnPrimary">#052A42</item>
+        <item name="colorPrimaryContainer">#1B4B69</item>
+        <item name="colorOnPrimaryContainer">#D3E8F5</item>
+        <item name="colorSecondaryContainer">#1B4B69</item>
+        <item name="colorOnSecondaryContainer">#D3E8F5</item>
+        <item name="colorSurface">#0D141A</item>
+        <item name="colorOnSurface">#E1EBF3</item>
+        <item name="colorOnSurfaceVariant">#9FB2C2</item>
+        <item name="colorSurfaceContainer">#19232D</item>
+        <item name="colorSurfaceContainerHigh">#19232D</item>
+        <item name="colorOutline">#71859A</item>
+        <item name="android:statusBarColor">#0D141A</item>
+        <item name="android:navigationBarColor">#0D141A</item>
+        <item name="android:windowBackground">#0D141A</item>
+        <item name="android:windowLightStatusBar">@bool/light_bars</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
+    </style>
+    <style name="Theme.OkMap.Sand" parent="Base.Theme.OkMap">
+        <item name="gSurface">#16120E</item>
+        <item name="gPanel">#EB1D1812</item>
+        <item name="gStroke">#24FFFFFF</item>
+        <item name="gFab">#F51D1812</item>
+        <item name="gDialog">#241E17</item>
+        <item name="gTextPrimary">#EFE6DA</item>
+        <item name="gTextSecondary">#BBAA97</item>
+        <item name="gHint">#8C7D6C</item>
+        <item name="gIcon">#E8DCCB</item>
+        <item name="gAccent">#E8996F</item>
+        <item name="gOnAccent">#3A1505</item>
+        <item name="gAccentContainer">#6B3418</item>
+        <item name="gOnAccentContainer">#F4DDD0</item>
+        <item name="gCrosshair">#FF8070</item>
+        <item name="gCrosshairHalo">#CC16120E</item>
+        <item name="colorPrimary">#E8996F</item>
+        <item name="colorOnPrimary">#3A1505</item>
+        <item name="colorPrimaryContainer">#6B3418</item>
+        <item name="colorOnPrimaryContainer">#F4DDD0</item>
+        <item name="colorSecondaryContainer">#6B3418</item>
+        <item name="colorOnSecondaryContainer">#F4DDD0</item>
+        <item name="colorSurface">#16120E</item>
+        <item name="colorOnSurface">#EFE6DA</item>
+        <item name="colorOnSurfaceVariant">#BBAA97</item>
+        <item name="colorSurfaceContainer">#241E17</item>
+        <item name="colorSurfaceContainerHigh">#241E17</item>
+        <item name="colorOutline">#8C7D6C</item>
+        <item name="android:statusBarColor">#16120E</item>
+        <item name="android:navigationBarColor">#16120E</item>
+        <item name="android:windowBackground">#16120E</item>
+        <item name="android:windowLightStatusBar">@bool/light_bars</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
+    </style>
+    <style name="Theme.OkMap.Dusk" parent="Base.Theme.OkMap">
+        <item name="gSurface">#121019</item>
+        <item name="gPanel">#EB181624</item>
+        <item name="gStroke">#24FFFFFF</item>
+        <item name="gFab">#F5181624</item>
+        <item name="gDialog">#1F1C2D</item>
+        <item name="gTextPrimary">#E8E5F3</item>
+        <item name="gTextSecondary">#ADA8C2</item>
+        <item name="gHint">#7E7996</item>
+        <item name="gIcon">#DEDAEE</item>
+        <item name="gAccent">#B5A6F0</item>
+        <item name="gOnAccent">#231552</item>
+        <item name="gAccentContainer">#473A85</item>
+        <item name="gOnAccentContainer">#E3DDF6</item>
+        <item name="gCrosshair">#FF7088</item>
+        <item name="gCrosshairHalo">#CC121019</item>
+        <item name="colorPrimary">#B5A6F0</item>
+        <item name="colorOnPrimary">#231552</item>
+        <item name="colorPrimaryContainer">#473A85</item>
+        <item name="colorOnPrimaryContainer">#E3DDF6</item>
+        <item name="colorSecondaryContainer">#473A85</item>
+        <item name="colorOnSecondaryContainer">#E3DDF6</item>
+        <item name="colorSurface">#121019</item>
+        <item name="colorOnSurface">#E8E5F3</item>
+        <item name="colorOnSurfaceVariant">#ADA8C2</item>
+        <item name="colorSurfaceContainer">#1F1C2D</item>
+        <item name="colorSurfaceContainerHigh">#1F1C2D</item>
+        <item name="colorOutline">#7E7996</item>
+        <item name="android:statusBarColor">#121019</item>
+        <item name="android:navigationBarColor">#121019</item>
+        <item name="android:windowBackground">#121019</item>
+        <item name="android:windowLightStatusBar">@bool/light_bars</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
+    </style>
+    <style name="Theme.OkMap.Graphite" parent="Base.Theme.OkMap">
+        <item name="gSurface">#111213</item>
+        <item name="gPanel">#EB181A1C</item>
+        <item name="gStroke">#24FFFFFF</item>
+        <item name="gFab">#F5181A1C</item>
+        <item name="gDialog">#1F2123</item>
+        <item name="gTextPrimary">#E8E9EA</item>
+        <item name="gTextSecondary">#A9ADB2</item>
+        <item name="gHint">#7A7F85</item>
+        <item name="gIcon">#E0E2E4</item>
+        <item name="gAccent">#F0A868</item>
+        <item name="gOnAccent">#3A1C04</item>
+        <item name="gAccentContainer">#6A3A12</item>
+        <item name="gOnAccentContainer">#F6E0CD</item>
+        <item name="gCrosshair">#FF8070</item>
+        <item name="gCrosshairHalo">#CC111213</item>
+        <item name="colorPrimary">#F0A868</item>
+        <item name="colorOnPrimary">#3A1C04</item>
+        <item name="colorPrimaryContainer">#6A3A12</item>
+        <item name="colorOnPrimaryContainer">#F6E0CD</item>
+        <item name="colorSecondaryContainer">#6A3A12</item>
+        <item name="colorOnSecondaryContainer">#F6E0CD</item>
+        <item name="colorSurface">#111213</item>
+        <item name="colorOnSurface">#E8E9EA</item>
+        <item name="colorOnSurfaceVariant">#A9ADB2</item>
+        <item name="colorSurfaceContainer">#1F2123</item>
+        <item name="colorSurfaceContainerHigh">#1F2123</item>
+        <item name="colorOutline">#7A7F85</item>
+        <item name="android:statusBarColor">#111213</item>
+        <item name="android:navigationBarColor">#111213</item>
+        <item name="android:windowBackground">#111213</item>
+        <item name="android:windowLightStatusBar">@bool/light_bars</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
+    </style>
+</resources>

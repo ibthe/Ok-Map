@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Geometry: 4 dp grid, 16 dp screen margin on all four sides, 8 dp between stacked blocks,
+     12 dp between neighbouring controls, 48 dp touch targets, 56 dp primary controls. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <org.maplibre.android.maps.MapView
+        android:id="@+id/mapView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- crosshair: the point shown in the info chip and saved by the primary button -->
+    <ImageView
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_gravity="center"
+        android:importantForAccessibility="no"
+        android:src="@drawable/ic_crosshair" />
+
+    <!-- top: search, results, coordinates -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:layout_marginStart="@dimen/screen_margin"
+        android:layout_marginTop="@dimen/screen_margin"
+        android:layout_marginEnd="@dimen/screen_margin"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/control_lg"
+            android:background="@drawable/bg_panel_pill"
+            android:elevation="6dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:layout_width="@dimen/icon"
+                android:layout_height="@dimen/icon"
+                android:layout_marginStart="@dimen/space_4"
+                android:importantForAccessibility="no"
+                android:src="@drawable/ic_search" />
+
+            <EditText
+                android:id="@+id/etSearch"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@null"
+                android:hint="@string/search_hint"
+                android:imeOptions="actionSearch"
+                android:importantForAutofill="no"
+                android:inputType="text"
+                android:maxLines="1"
+                android:paddingStart="@dimen/space_3"
+                android:paddingEnd="@dimen/space_2"
+                android:textAppearance="@style/TextAppearance.G.Body"
+                android:textColor="?attr/gTextPrimary"
+                android:textColorHint="?attr/gHint" />
+
+            <ImageButton
+                android:id="@+id/btnClear"
+                android:layout_width="@dimen/control_sm"
+                android:layout_height="@dimen/control_sm"
+                android:layout_marginEnd="@dimen/space_1"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/clear"
+                android:src="@drawable/ic_clear"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <ListView
+            android:id="@+id/lvResults"
+            android:layout_width="match_parent"
+            android:layout_height="320dp"
+            android:layout_marginTop="@dimen/space_2"
+            android:background="@drawable/bg_panel_list"
+            android:clipToOutline="true"
+            android:divider="?attr/gStroke"
+            android:dividerHeight="1dp"
+            android:elevation="8dp"
+            android:outlineProvider="background"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/tvInfo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/space_2"
+            android:layout_marginTop="@dimen/space_2"
+            android:background="@drawable/bg_panel"
+            android:elevation="4dp"
+            android:fontFeatureSettings="tnum"
+            android:paddingStart="@dimen/space_3"
+            android:paddingTop="@dimen/space_2"
+            android:paddingEnd="@dimen/space_3"
+            android:paddingBottom="@dimen/space_2"
+            android:textAppearance="@style/TextAppearance.G.Caption"
+            android:textColor="?attr/gTextSecondary" />
+    </LinearLayout>
+
+    <!-- right: round map controls, right edge flush with the primary button below -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end|bottom"
+        android:layout_marginEnd="@dimen/screen_margin"
+        android:layout_marginBottom="88dp"
+        android:orientation="vertical">
+
+        <ImageButton
+            android:id="@+id/btnFit"
+            android:layout_width="@dimen/control_sm"
+            android:layout_height="@dimen/control_sm"
+            android:background="@drawable/bg_fab"
+            android:contentDescription="@string/btn_fit"
+            android:elevation="6dp"
+            android:src="@drawable/ic_fit" />
+
+        <ImageButton
+            android:id="@+id/btnLocation"
+            android:layout_width="@dimen/control_sm"
+            android:layout_height="@dimen/control_sm"
+            android:layout_marginTop="@dimen/space_3"
+            android:background="@drawable/bg_fab"
+            android:contentDescription="@string/btn_location"
+            android:elevation="6dp"
+            android:src="@drawable/ic_my_location"
+            app:tint="?attr/gAccent" />
+    </LinearLayout>
+
+    <!-- bottom: menu + primary action -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/control_lg"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="@dimen/screen_margin"
+        android:layout_marginEnd="@dimen/screen_margin"
+        android:layout_marginBottom="@dimen/screen_margin"
+        android:orientation="horizontal">
+
+        <ImageButton
+            android:id="@+id/btnMenu"
+            android:layout_width="@dimen/control_lg"
+            android:layout_height="@dimen/control_lg"
+            android:background="@drawable/bg_fab"
+            android:contentDescription="@string/btn_menu"
+            android:elevation="6dp"
+            android:src="@drawable/ic_menu" />
+
+        <LinearLayout
+            android:id="@+id/btnPoint"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="@dimen/space_3"
+            android:layout_weight="1"
+            android:background="@drawable/bg_btn_primary"
+            android:clickable="true"
+            android:contentDescription="@string/btn_point"
+            android:elevation="6dp"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:layout_width="@dimen/icon"
+                android:layout_height="@dimen/icon"
+                android:importantForAccessibility="no"
+                android:src="@drawable/ic_add_location"
+                app:tint="?attr/gOnAccent" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/space_2"
+                android:text="@string/btn_point"
+                android:textAppearance="@style/TextAppearance.G.Label"
+                android:textColor="?attr/gOnAccent"
+                android:textSize="16sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/loading"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="?attr/colorSurface"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="@dimen/space_6"
+        android:visibility="gone">
+
+        <ProgressBar
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:indeterminate="true"
+            android:indeterminateTint="?attr/gAccent" />
+
+        <TextView
+            android:id="@+id/loadingText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_4"
+            android:gravity="center"
+            android:text="@string/loading"
+            android:textAppearance="@style/TextAppearance.G.Body"
+            android:textColor="?attr/gTextSecondary" />
+    </LinearLayout>
+</FrameLayout>

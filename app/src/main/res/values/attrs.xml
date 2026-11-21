@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <attr name="gSurface" format="color" />
+    <attr name="gPanel" format="color" />
+    <attr name="gStroke" format="color" />
+    <attr name="gFab" format="color" />
+    <attr name="gDialog" format="color" />
+    <attr name="gTextPrimary" format="color" />
+    <attr name="gTextSecondary" format="color" />
+    <attr name="gHint" format="color" />
+    <attr name="gIcon" format="color" />
+    <attr name="gAccent" format="color" />
+    <attr name="gOnAccent" format="color" />
+    <attr name="gAccentContainer" format="color" />
+    <attr name="gOnAccentContainer" format="color" />
+    <attr name="gCrosshair" format="color" />
+    <attr name="gCrosshairHalo" format="color" />
+</resources>

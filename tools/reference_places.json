@@ -1,0 +1,6 @@
+[
+ {"group": "rail", "kind": "station", "ka": "თბილისი ცენტრალი", "ru": "Тбилиси-Центральный (вокзал)", "en": "Tbilisi Central Railway Station", "lat": 41.72095, "lon": 44.79934},
+ {"group": "air", "kind": "aerodrome", "ka": "თბილისის საერთაშორისო აეროპორტი", "ru": "Аэропорт Тбилиси имени Шота Руставели", "en": "Tbilisi International Airport", "lat": 41.6692, "lon": 44.9547},
+ {"group": "air", "kind": "aerodrome", "ka": "ქუთაისის საერთაშორისო აეროპორტი", "ru": "Аэропорт Кутаиси", "en": "Kutaisi International Airport", "lat": 42.1760, "lon": 42.4826},
+ {"group": "air", "kind": "aerodrome", "ka": "ბათუმის საერთაშორისო აეროპორტი", "ru": "Аэропорт Батуми", "en": "Batumi International Airport", "lat": 41.6103, "lon": 41.5997}
+]

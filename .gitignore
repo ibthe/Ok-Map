@@ -1,0 +1,8 @@
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+data/
+app/src/main/assets/map.mbtiles
+app/src/main/assets/glyphs/

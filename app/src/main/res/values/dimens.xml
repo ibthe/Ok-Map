@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 4 dp base grid; 8 dp rhythm between blocks, 16 dp screen margin -->
+    <dimen name="space_1">4dp</dimen>
+    <dimen name="space_2">8dp</dimen>
+    <dimen name="space_3">12dp</dimen>
+    <dimen name="space_4">16dp</dimen>
+    <dimen name="space_6">24dp</dimen>
+    <dimen name="screen_margin">16dp</dimen>
+    <dimen name="control_sm">48dp</dimen>
+    <dimen name="control_lg">56dp</dimen>
+    <dimen name="radius_chip">12dp</dimen>
+    <dimen name="radius_card">20dp</dimen>
+    <dimen name="radius_pill">28dp</dimen>
+    <dimen name="icon">24dp</dimen>
+</resources>
