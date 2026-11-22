@@ -90,6 +90,7 @@ class MainActivity : AppCompatActivity() {
     private var shownTrackId = -1L
 
     private var myLoc: Location? = null
+    private lateinit var nav: Navigator
     private var following = false
     private var locActive = false
     private var pendingAfterPerm: (() -> Unit)? = null
@@ -194,6 +195,9 @@ class MainActivity : AppCompatActivity() {
         mapView.onCreate(savedInstanceState)
         mapView.addOnDidFailLoadingMapListener { msg -> errors.add(msg ?: "?") }
 
+        nav = Navigator(this, { File(filesDir, "graph.bin").takeIf { it.exists() } }, { map }, { style }, prefs,
+            { isNight() }, { onNavModeChanged() })
+        onBackPressedDispatcher.addCallback(this, backToStopNav)
         findViewById<View>(R.id.btnMenu).setOnClickListener { showMenu() }
         findViewById<View>(R.id.btnRec).setOnClickListener { toggleRecording() }
         buildChips()
@@ -202,7 +206,9 @@ class MainActivity : AppCompatActivity() {
             val c = map?.cameraPosition?.target
             if (c != null) addWaypointDialog(c)
         }
-        findViewById<View>(R.id.btnLocation).setOnClickListener { withLocationPermission { startLocation(true) } }
+        findViewById<View>(R.id.btnLocation).setOnClickListener {
+            if (nav.navigating) nav.recenter(myLoc) else withLocationPermission { startLocation(true) }
+        }
         findViewById<View>(R.id.btnFit).setOnClickListener {
             map?.easeCamera(CameraUpdateFactory.newLatLngBounds(dataBounds(), 48), 700)
         }
@@ -243,9 +249,9 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() { super.onStart(); mapView.onStart(); if (locActive) startLocation(false) }
     override fun onResume() { super.onResume(); mapView.onResume(); scheduleTick() }
     override fun onPause() { mapView.onPause(); ui.removeCallbacks(tick); super.onPause() }
-    override fun onStop() { stopLocationUpdates(); mapView.onStop(); super.onStop() }
+    override fun onStop() { if (!nav.navigating) stopLocationUpdates(); mapView.onStop(); super.onStop() }
     override fun onLowMemory() { super.onLowMemory(); mapView.onLowMemory() }
-    override fun onDestroy() { mapView.onDestroy(); super.onDestroy() }
+    override fun onDestroy() { nav.shutdown(); mapView.onDestroy(); super.onDestroy() }
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         mapView.onSaveInstanceState(outState)
@@ -318,9 +324,9 @@ class MainActivity : AppCompatActivity() {
         )
         m.addOnCameraIdleListener { updateInfo() }
         m.addOnCameraMoveStartedListener { reason ->
-            if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) following = false
+            if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) { following = false; nav.onUserGesture() }
         }
-        m.addOnMapLongClickListener { ll -> addWaypointDialog(ll); true }
+        m.addOnMapLongClickListener { ll -> showPlaceSheet(ll, null); true }
         m.addOnMapClickListener { ll ->
             if (rulerOn) { rulerPts.add(ll); refreshRuler(); true } else false
         }
@@ -413,6 +419,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun addOverlays(s: Style) {
         val night = isNight()
+        nav.addLayers(s)
         s.addSource(GeoJsonSource("ovl-search"))
         s.addLayer(CircleLayer("ovl-search-c", "ovl-search").withProperties(
             PropertyFactory.circleRadius(9f), PropertyFactory.circleColor(themeHex(R.attr.gCrosshair)),
@@ -450,6 +457,7 @@ class MainActivity : AppCompatActivity() {
         s.addLayer(CircleLayer("ovl-me-c", "ovl-me").withProperties(
             PropertyFactory.circleRadius(8f), PropertyFactory.circleColor(if (night) "#6FA0FF" else "#2563EB"),
             PropertyFactory.circleStrokeColor("#ffffff"), PropertyFactory.circleStrokeWidth(3f)))
+        nav.restoreRoute()
     }
 
     private fun src(id: String): GeoJsonSource? = style?.getSourceAs<GeoJsonSource>(id)
@@ -558,6 +566,7 @@ class MainActivity : AppCompatActivity() {
         lvResults.visibility = View.GONE
         etSearch.clearFocus()
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(etSearch.windowToken, 0)
+        showPlaceSheet(ll, p.ru.ifBlank { p.en.ifBlank { p.ka } })
     }
 
     private fun kindLabel(k: String): String = KIND_RU[k] ?: k
@@ -581,6 +590,7 @@ class MainActivity : AppCompatActivity() {
             val first = myLoc == null
             myLoc = l
             refreshMe()
+            if (nav.navigating) { nav.onLocation(l); updateInfo(); return }
             if ((first || following) && map != null) {
                 val z = maxOf(map!!.cameraPosition.zoom, 14.0)
                 map?.easeCamera(CameraUpdateFactory.newLatLngZoom(LatLng(l.latitude, l.longitude), z), 600)
@@ -723,6 +733,15 @@ class MainActivity : AppCompatActivity() {
                     add(menuSwitch("Линейка", rulerOn) { on ->
                         rulerOn = on; if (!on) rulerPts.clear(); refreshRuler(); if (on) sheet.dismiss()
                     })
+                    add(menuRow("Маршрут к центру карты", null, act {
+                        map?.cameraPosition?.target?.let { startRoute(it, "Центр карты") }
+                    }))
+                    add(menuSwitch("Голосовые подсказки", prefs.getBoolean("nav_voice", true)) { on ->
+                        prefs.edit().putBoolean("nav_voice", on).apply()
+                    })
+                    add(menuSwitch("Избегать грунтовых дорог", prefs.getBoolean("nav_avoid_unpaved", true)) { on ->
+                        prefs.edit().putBoolean("nav_avoid_unpaved", on).apply()
+                    })
                     add(menuRow("Перейти к координатам", null, act { gotoCoordinatesDialog() }), true)
                 }
                 1 -> {
@@ -851,6 +870,69 @@ class MainActivity : AppCompatActivity() {
         val rec = TrackService.running
         b.imageTintList = android.content.res.ColorStateList.valueOf(themeColor(if (rec) R.attr.gCrosshair else R.attr.gIcon))
         b.contentDescription = if (rec) "Остановить запись трека" else "Начать запись трека"
+    }
+
+    // ------------------------------------------------------------------ routes
+    private val backToStopNav = object : androidx.activity.OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() { nav.stop() }
+    }
+
+    /** Hides the normal map controls while a route is previewed / driven. */
+    private fun onNavModeChanged() {
+        val on = nav.active
+        backToStopNav.isEnabled = on
+        findViewById<View>(R.id.topColumn).visibility = if (on) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.dock).visibility = if (on) View.GONE else View.VISIBLE
+        val rc = findViewById<View>(R.id.rightControls)
+        (rc.layoutParams as android.widget.FrameLayout.LayoutParams).bottomMargin = dp(if (on) 112 else 88)
+        rc.requestLayout()
+        if (nav.navigating && !locActive) withLocationPermission { startLocation(false) }
+        updateInfo()
+    }
+
+    /** Route from the current position (or from the map centre when there is no GPS fix yet). */
+    private fun startRoute(to: LatLng, title: String) {
+        val me = myLoc
+        if (me != null) {
+            nav.planTo(to.latitude, to.longitude, title, me.latitude, me.longitude)
+            return
+        }
+        val c = map?.cameraPosition?.target
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Местоположение не определено")
+            .setMessage("Включите GPS и подождите фиксации, либо постройте маршрут от центра карты.")
+            .setPositiveButton("От центра карты") { _, _ ->
+                if (c != null) nav.planTo(to.latitude, to.longitude, title, c.latitude, c.longitude)
+            }
+            .setNeutralButton("Включить GPS") { _, _ -> withLocationPermission { startLocation(false) } }
+            .setNegativeButton("Отмена", null).show()
+    }
+
+    /** Bottom card for a place (search result or long press): route, save, coordinates. */
+    private fun showPlaceSheet(ll: LatLng, title: String?) {
+        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(16), dp(24), dp(24))
+        }
+        root.addView(label(title ?: "Точка на карте", 20f, R.attr.gTextPrimary, true))
+        root.addView(label(Geo.fmtCoord(ll.latitude, ll.longitude), 14f, R.attr.gTextSecondary).apply { setPadding(0, dp(4), 0, dp(16)) })
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val go = com.google.android.material.button.MaterialButton(this).apply {
+            text = "Маршрут"; textSize = 16f; isAllCaps = false
+            setOnClickListener { sheet.dismiss(); startRoute(ll, title ?: "Точка на карте") }
+        }
+        val save = com.google.android.material.button.MaterialButton(this, null,
+            com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = "Сохранить"; textSize = 16f; isAllCaps = false
+            setOnClickListener { sheet.dismiss(); addWaypointDialog(ll) }
+        }
+        row.addView(go, LinearLayout.LayoutParams(0, dp(56), 1f).apply { marginEnd = dp(12) })
+        row.addView(save, LinearLayout.LayoutParams(0, dp(56), 1f))
+        root.addView(row)
+        sheet.setContentView(root)
+        sheet.window?.setDimAmount(0.15f)
+        sheet.show()
     }
 
     private fun showLanguageDialog() {
@@ -1176,7 +1258,7 @@ class MainActivity : AppCompatActivity() {
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
     companion object {
-        private val DATA_FILES = listOf("map.mbtiles", "relief.mbtiles", "places.db")
+        private val DATA_FILES = listOf("map.mbtiles", "relief.mbtiles", "places.db", "graph.bin")
         // transport POIs have their own always-visible layers (tr-*, lbl-station ...); keep them out of the generic POI layers
         private const val TR_LIST = "'station','halt','subway','tram_stop','bus_station','bus_stop','ferry_terminal','harbor'"
         private const val TRANSPORT_EXPR = "['any',['match',['get','class'],[$TR_LIST],true,false]," +

@@ -39,6 +39,8 @@ jobs:
             app/src/main/assets/places.db
             app/src/main/assets/relief.mbtiles
             app/src/main/assets/places.stamp
+            app/src/main/assets/graph.bin
+            app/src/main/assets/graph.stamp
           # build_places.py / reference_places.json are NOT in the key: they only rebuild the search index
           # (see "Decide what has to be rebuilt"), the 30-60 min tile build stays cached
           key: mapdata-v3-${{ hashFiles('tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py', 'tools/build_relief.py') }}
@@ -56,12 +58,16 @@ jobs:
           PH=$(cat tools/build_places.py tools/mvt.py tools/reference_places.json | sha1sum | cut -d' ' -f1)
           echo "$PH" > /tmp/places.stamp
           [ "$(cat app/src/main/assets/places.stamp 2>/dev/null)" = "$PH" ] || echo "places=true" >> "$GITHUB_OUTPUT"
+          [ -s app/src/main/assets/graph.bin ] || echo "graph=true" >> "$GITHUB_OUTPUT"
+          GH=$(cat tools/build_graph.py | sha1sum | cut -d' ' -f1)
+          echo "$GH" > /tmp/graph.stamp
+          [ "$(cat app/src/main/assets/graph.stamp 2>/dev/null)" = "$GH" ] || echo "graph=true" >> "$GITHUB_OUTPUT"
           [ -s app/src/main/assets/relief.mbtiles ] || echo "relief=true" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
           ls -lh app/src/main/assets || true
 
       - name: Download OSM extract of Georgia (Geofabrik)
-        if: steps.need.outputs.tiles == 'true'
+        if: steps.need.outputs.tiles == 'true' || steps.need.outputs.graph == 'true'
         env:
           OSM_URL: ${{ github.event.inputs.osm_url }}
         run: |
@@ -96,6 +102,20 @@ jobs:
         run: |
           python build_places.py ../app/src/main/assets/map.mbtiles ../app/src/main/assets/places.db
           cp /tmp/places.stamp ../app/src/main/assets/places.stamp
+
+      # Road graph for the offline car navigator. If this step fails, the APK is still built (without navigation).
+      - name: Build offline road graph (car router)
+        if: steps.need.outputs.graph == 'true'
+        continue-on-error: true
+        run: |
+          python -m pip install --quiet osmium numpy
+          python tools/test_graph.py
+          python tools/build_graph.py data/region.osm.pbf app/src/main/assets/graph.bin
+          ls -lh app/src/main/assets/graph.bin
+          # smoke test on the real graph: Tbilisi -> Kutaisi by road is roughly 230 km
+          python tools/route_check.py app/src/main/assets/graph.bin 41.7151 44.8271 42.2679 42.7180 190 320 \
+            || echo "::warning::route smoke test Tbilisi-Kutaisi failed"
+          cp /tmp/graph.stamp app/src/main/assets/graph.stamp
 
       - name: Build relief tiles (hillshade + elevation readout)
         if: steps.need.outputs.relief == 'true'

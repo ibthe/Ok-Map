@@ -1,0 +1,384 @@
+package app.okmap
+
+import android.content.Intent
+import android.content.SharedPreferences
+import android.location.Location
+import android.media.AudioAttributes
+import android.speech.tts.TextToSpeech
+import android.view.View
+import android.view.WindowManager
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.Property
+import org.maplibre.android.style.layers.PropertyFactory
+import org.maplibre.android.style.sources.GeoJsonSource
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.concurrent.thread
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+
+/**
+ * Route planning and turn-by-turn guidance on top of [Graph]: route preview, follow camera, spoken prompts (system TTS,
+ * works offline), automatic rerouting. All UI views live in activity_main.xml.
+ */
+class Navigator(
+    private val act: AppCompatActivity,
+    private val graphFile: () -> File?,
+    private val map: () -> MapLibreMap?,
+    private val style: () -> Style?,
+    private val prefs: SharedPreferences,
+    private val isNight: () -> Boolean,
+    private val onModeChanged: () -> Unit
+) {
+    private enum class State { IDLE, PREVIEW, NAV }
+
+    private var state = State.IDLE
+    private var graph: Graph? = null
+    private var route: Route? = null
+    private var destLat = 0.0
+    private var destLon = 0.0
+    private var destTitle = ""
+    private var progressIdx = 0
+    private var along = 0.0
+    private var stepIdx = 1
+    private var announced = IntArray(0)
+    private var offCount = 0
+    private var lastReroute = 0L
+    private var busy = false
+    private var follow = true
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
+    private var pendingSpeech: String? = null
+
+    val active: Boolean get() = state != State.IDLE
+    val navigating: Boolean get() = state == State.NAV
+
+    private val navTop: View = act.findViewById(R.id.navTop)
+    private val navArrow: TextView = act.findViewById(R.id.navArrow)
+    private val navDist: TextView = act.findViewById(R.id.navDist)
+    private val navText: TextView = act.findViewById(R.id.navText)
+    private val navBottom: View = act.findViewById(R.id.navBottom)
+    private val navStat: TextView = act.findViewById(R.id.navStat)
+    private val navSub: TextView = act.findViewById(R.id.navSub)
+    private val btnCancel: TextView = act.findViewById(R.id.btnNavCancel)
+    private val btnGo: TextView = act.findViewById(R.id.btnNavGo)
+
+    init {
+        btnCancel.setOnClickListener { stop() }
+        btnGo.setOnClickListener { start() }
+    }
+
+    // ------------------------------------------------------------------ map layers
+    fun addLayers(s: Style) {
+        val night = isNight()
+        s.addSource(GeoJsonSource("ovl-route"))
+        s.addLayer(LineLayer("ovl-route-casing", "ovl-route").withProperties(
+            PropertyFactory.lineColor(if (night) "#0B1220" else "#FFFFFF"), PropertyFactory.lineWidth(10f),
+            PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)))
+        s.addLayer(LineLayer("ovl-route-l", "ovl-route").withProperties(
+            PropertyFactory.lineColor(if (night) "#5AB0FF" else "#1769E0"), PropertyFactory.lineWidth(6f),
+            PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)))
+    }
+
+    /** Called after the style was (re)loaded, e.g. on a theme change while a route is shown. */
+    fun restoreRoute() {
+        val r = route ?: return
+        showRouteOnMap(r)
+    }
+
+    private fun showRouteOnMap(r: Route) {
+        val pts = ArrayList<LatLng>(r.lat.size)
+        for (i in r.lat.indices) pts.add(LatLng(r.lat[i], r.lon[i]))
+        style()?.getSourceAs<GeoJsonSource>("ovl-route")?.setGeoJson(Geo.lineFc(pts))
+        style()?.getSourceAs<GeoJsonSource>("ovl-search")?.setGeoJson(Geo.pointFc(listOf(LatLng(destLat, destLon))))
+    }
+
+    // ------------------------------------------------------------------ planning
+    fun planTo(lat: Double, lon: Double, title: String, fromLat: Double, fromLon: Double, silent: Boolean = false) {
+        val f = graphFile()
+        if (f == null) {
+            toast("Нет данных дорог: в приложении не найден graph.bin")
+            return
+        }
+        if (busy) return
+        busy = true
+        if (!silent) toast("Строю маршрут…")
+        thread(name = "route") {
+            var result: Route? = null
+            var error: String? = null
+            try {
+                val g = graph ?: Graph(f).also { graph = it }
+                val avoid = prefs.getBoolean("nav_avoid_unpaved", true)
+                val s = g.snap(fromLat, fromLon)
+                val e = g.snap(lat, lon)
+                if (s == null || e == null) error = "Рядом с точкой нет дорог"
+                else if (s.dist > 3000 || e.dist > 3000) error = "Точка слишком далеко от дорог"
+                else {
+                    val legs = g.route(s, e, avoid)
+                    if (legs == null) error = "Маршрут не найден: дороги не связаны"
+                    else result = g.buildRoute(legs)
+                }
+            } catch (ex: Exception) {
+                error = "Ошибка маршрута: ${ex.message}"
+            } catch (oom: OutOfMemoryError) {
+                error = "Не хватило памяти для маршрута"
+            }
+            act.runOnUiThread {
+                busy = false
+                if (silent && !navigating) return@runOnUiThread        // navigation was ended while rerouting
+                if (error != null || result == null) { toast(error ?: "Маршрут не найден"); return@runOnUiThread }
+                destLat = lat; destLon = lon; destTitle = title
+                applyRoute(result, silent)
+            }
+        }
+    }
+
+    private fun applyRoute(r: Route, rerouted: Boolean) {
+        route = r
+        progressIdx = 0
+        along = 0.0
+        stepIdx = 1
+        announced = IntArray(r.steps.size)
+        offCount = 0
+        showRouteOnMap(r)
+        if (rerouted && navigating) {
+            updateGuidance(null)
+            return
+        }
+        state = State.PREVIEW
+        val b = LatLngBounds.Builder()
+        for (i in r.lat.indices step max(1, r.lat.size / 400)) b.include(LatLng(r.lat[i], r.lon[i]))
+        b.include(LatLng(r.lat[r.lat.size - 1], r.lon[r.lon.size - 1]))
+        val d = act.resources.displayMetrics.density
+        map()?.easeCamera(CameraUpdateFactory.newLatLngBounds(b.build(), (32 * d).toInt(), (96 * d).toInt(), (32 * d).toInt(), (200 * d).toInt()), 800)
+        showPanel(preview = true)
+        onModeChanged()
+    }
+
+    // ------------------------------------------------------------------ navigation
+    private fun start() {
+        val r = route ?: return
+        state = State.NAV
+        follow = true
+        act.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        try { ContextCompat.startForegroundService(act, Intent(act, NavService::class.java)) } catch (e: Exception) {}
+        if (prefs.getBoolean("nav_voice", true)) initTts()
+        val h = act.resources.displayMetrics.heightPixels
+        map()?.setPadding(0, (h * 0.35).toInt(), 0, 0)
+        showPanel(preview = false)
+        updateGuidance(null)
+        speak(r.steps.getOrNull(1)?.let { "Маршрут построен. " + describe(r, it) } ?: "Маршрут построен")
+        onModeChanged()
+    }
+
+    fun stop() {
+        val wasNav = navigating
+        state = State.IDLE
+        route = null
+        act.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        act.stopService(Intent(act, NavService::class.java))
+        tts?.stop(); tts?.shutdown(); tts = null; ttsReady = false
+        style()?.getSourceAs<GeoJsonSource>("ovl-route")?.setGeoJson(Geo.lineFc(emptyList()))
+        style()?.getSourceAs<GeoJsonSource>("ovl-search")?.setGeoJson(Geo.pointFc(emptyList()))
+        navTop.visibility = View.GONE
+        navBottom.visibility = View.GONE
+        map()?.let { m ->
+            m.setPadding(0, 0, 0, 0)
+            if (wasNav) {
+                val c = m.cameraPosition.target
+                if (c != null) m.easeCamera(CameraUpdateFactory.newCameraPosition(
+                    CameraPosition.Builder().target(c).zoom(m.cameraPosition.zoom).bearing(0.0).tilt(0.0).build()), 600)
+            }
+        }
+        onModeChanged()
+    }
+
+    fun onUserGesture() { if (navigating) follow = false }
+
+    fun recenter(loc: Location?) {
+        follow = true
+        if (loc != null) followCamera(loc)
+    }
+
+    /** Called for every GPS fix while [navigating]. */
+    fun onLocation(l: Location) {
+        val r = route ?: return
+        if (!navigating) return
+        val n = r.lat.size
+        // nearest point of the route in a window around the last known position
+        val from = max(0, progressIdx - 3)
+        val to = min(n - 2, progressIdx + 400)
+        val k = cos(Math.toRadians(l.latitude))
+        var bestD = Double.MAX_VALUE
+        var bestJ = progressIdx
+        var bestAlong = along
+        for (j in from..to) {
+            val ax = (r.lon[j] - l.longitude) * k
+            val ay = r.lat[j] - l.latitude
+            val dx = (r.lon[j + 1] - r.lon[j]) * k
+            val dy = r.lat[j + 1] - r.lat[j]
+            val l2 = dx * dx + dy * dy
+            val t = if (l2 == 0.0) 0.0 else max(0.0, min(1.0, -(ax * dx + ay * dy) / l2))
+            val d = hypot(ax + t * dx, ay + t * dy) * 111320.0
+            if (d < bestD) {
+                bestD = d
+                bestJ = j
+                bestAlong = r.cum[j] + t * (r.cum[j + 1] - r.cum[j])
+            }
+        }
+        val tolerance = max(35.0, l.accuracy * 1.5)
+        if (bestD <= tolerance) {
+            offCount = 0
+            if (bestAlong >= along - 20.0) { progressIdx = bestJ; along = max(along, bestAlong) }
+        } else {
+            offCount++
+            val now = System.currentTimeMillis()
+            if (offCount >= 3 && now - lastReroute > 8000 && !busy) {
+                lastReroute = now
+                offCount = 0
+                speak("Перестраиваю маршрут")
+                planTo(destLat, destLon, destTitle, l.latitude, l.longitude, silent = true)
+            }
+        }
+        updateGuidance(l)
+        if (r.distance - along < 25.0) {
+            speak("Вы прибыли в пункт назначения")
+            toast("Вы прибыли")
+            stop()
+            return
+        }
+        if (follow) followCamera(l)
+    }
+
+    private fun followCamera(l: Location) {
+        val m = map() ?: return
+        val v = if (l.hasSpeed()) l.speed else 0f
+        val zoom = when {
+            v < 8f -> 17.0
+            v < 17f -> 16.2
+            v < 25f -> 15.5
+            else -> 14.9
+        }
+        val bearing = if (l.hasBearing() && v > 1.5f) l.bearing.toDouble() else m.cameraPosition.bearing
+        m.easeCamera(CameraUpdateFactory.newCameraPosition(
+            CameraPosition.Builder().target(LatLng(l.latitude, l.longitude)).zoom(zoom).bearing(bearing).tilt(40.0).build()), 800)
+    }
+
+    // ------------------------------------------------------------------ guidance UI + voice
+    private fun showPanel(preview: Boolean) {
+        navBottom.visibility = View.VISIBLE
+        navTop.visibility = if (preview) View.GONE else View.VISIBLE
+        btnGo.visibility = if (preview) View.VISIBLE else View.GONE
+        btnCancel.text = if (preview) "Отмена" else "Завершить"
+        val r = route ?: return
+        updateStats(r.distance - along, r.seconds * max(0.0, r.distance - along) / max(1.0, r.distance))
+        if (preview) navSub.text = destTitle
+    }
+
+    private fun updateStats(rest: Double, seconds: Double) {
+        val eta = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(System.currentTimeMillis() + (seconds * 1000).toLong()))
+        navStat.text = fmtDuration(seconds) + "  ·  " + Geo.fmtDist(rest)
+        if (navigating) navSub.text = "Прибытие в $eta"
+        else navSub.text = destTitle + "  ·  прибытие в $eta"
+    }
+
+    private fun updateGuidance(l: Location?) {
+        val r = route ?: return
+        val rest = max(0.0, r.distance - along)
+        updateStats(rest, r.seconds * rest / max(1.0, r.distance))
+        while (stepIdx < r.steps.size - 1 && r.cum[r.steps[stepIdx].pointIdx] <= along + 8.0) stepIdx++
+        val st = r.steps[min(stepIdx, r.steps.size - 1)]
+        val dist = max(0.0, r.cum[st.pointIdx] - along)
+        navArrow.text = arrow(st.type)
+        navDist.text = Geo.fmtDist(if (dist < 1000) (dist / 10).roundToInt() * 10.0 else dist)
+        navText.text = st.text
+        if (l == null) return
+        val speed = if (l.hasSpeed()) l.speed.toDouble() else 0.0
+        val far = min(1000.0, max(350.0, speed * 30.0))
+        val near = if (speed > 14) 220.0 else 120.0
+        val i = min(stepIdx, r.steps.size - 1)
+        if (st.type == Maneuver.ARRIVE) return
+        if (dist <= near && announced[i] and 2 == 0) {
+            announced[i] = announced[i] or 3
+            speak(if (dist > 60) "Через ${spokenDist(dist)}, ${lower(st.text)}" else st.text)
+        } else if (dist <= far && announced[i] and 1 == 0 && announced[i] and 2 == 0) {
+            announced[i] = announced[i] or 1
+            speak("Через ${spokenDist(dist)}, ${lower(st.text)}")
+        }
+    }
+
+    private fun describe(r: Route, st: Step) = "Через ${spokenDist(r.cum[st.pointIdx])}, ${lower(st.text)}"
+
+    private fun lower(t: String) = if (t.isEmpty()) t else t.substring(0, 1).lowercase() + t.substring(1)
+
+    private fun arrow(type: Int) = when (type) {
+        Maneuver.LEFT -> "↰"
+        Maneuver.RIGHT -> "↱"
+        Maneuver.SLIGHT_LEFT -> "↖"
+        Maneuver.SLIGHT_RIGHT -> "↗"
+        Maneuver.SHARP_LEFT -> "↙"
+        Maneuver.SHARP_RIGHT -> "↘"
+        Maneuver.UTURN -> "↶"
+        Maneuver.ROUNDABOUT -> "⟳"
+        Maneuver.ARRIVE -> "⚑"
+        else -> "↑"
+    }
+
+    private fun spokenDist(m: Double): String {
+        if (m < 1000) return "${max(50, (m / 50).roundToInt() * 50)} метров"
+        val km = (m / 100).roundToInt() / 10.0
+        if (km == km.toInt().toDouble()) {
+            val n = km.toInt()
+            val w = if (n % 10 == 1 && n % 100 != 11) "километр" else if (n % 10 in 2..4 && n % 100 !in 12..14) "километра" else "километров"
+            return "$n $w"
+        }
+        return String.format(Locale("ru"), "%.1f километра", km)
+    }
+
+    private fun fmtDuration(sec: Double): String {
+        val m = max(1, (sec / 60).roundToInt())
+        return if (m < 60) "$m мин" else "${m / 60} ч ${m % 60} мин"
+    }
+
+    private fun initTts() {
+        if (tts != null) return
+        tts = TextToSpeech(act) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                val res = tts?.setLanguage(Locale("ru", "RU"))
+                ttsReady = res != null && res >= TextToSpeech.LANG_AVAILABLE
+                tts?.setAudioAttributes(AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                if (!ttsReady) act.runOnUiThread { toast("Русский голос не установлен: подсказки только на экране") }
+                else pendingSpeech?.let { tts?.speak(it, TextToSpeech.QUEUE_FLUSH, null, "nav") }
+                pendingSpeech = null
+            }
+        }
+    }
+
+    private fun speak(text: String) {
+        if (!prefs.getBoolean("nav_voice", true)) return
+        if (ttsReady) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "nav") else pendingSpeech = text
+    }
+
+    fun shutdown() {
+        tts?.shutdown(); tts = null
+    }
+
+    private fun toast(s: String) = Toast.makeText(act, s, Toast.LENGTH_SHORT).show()
+}

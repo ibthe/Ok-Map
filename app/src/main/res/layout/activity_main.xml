@@ -22,6 +22,7 @@
 
     <!-- top: search, results, coordinates -->
     <LinearLayout
+        android:id="@+id/topColumn"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
@@ -125,6 +126,7 @@
 
     <!-- right: round map controls, right edge flush with the primary button below -->
     <LinearLayout
+        android:id="@+id/rightControls"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="end|bottom"
@@ -157,6 +159,7 @@
 
     <!-- bottom: menu + primary action -->
     <LinearLayout
+        android:id="@+id/dock"
         android:layout_width="match_parent"
         android:layout_height="@dimen/control_lg"
         android:layout_gravity="bottom"
@@ -219,6 +222,139 @@
             android:elevation="6dp"
             android:src="@drawable/ic_rec"
             android:stateListAnimator="@animator/press" />
+    </LinearLayout>
+
+    <!-- navigation: next manoeuvre (top) -->
+    <LinearLayout
+        android:id="@+id/navTop"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:layout_marginStart="@dimen/screen_margin"
+        android:layout_marginTop="@dimen/screen_margin"
+        android:layout_marginEnd="@dimen/screen_margin"
+        android:background="@drawable/bg_panel_list"
+        android:elevation="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="@dimen/space_3"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/navArrow"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:background="@drawable/bg_chip"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            android:selected="true"
+            android:textColor="?attr/gOnAccent"
+            android:textSize="36sp" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/space_3"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/navDist"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFeatureSettings="tnum"
+                android:textAppearance="@style/TextAppearance.G.Title"
+                android:textColor="?attr/gTextPrimary"
+                android:textSize="26sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/navText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="2"
+                android:textAppearance="@style/TextAppearance.G.Body"
+                android:textColor="?attr/gTextSecondary" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- navigation / route preview: summary and buttons (replaces the dock) -->
+    <LinearLayout
+        android:id="@+id/navBottom"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="@dimen/screen_margin"
+        android:layout_marginEnd="@dimen/screen_margin"
+        android:layout_marginBottom="@dimen/screen_margin"
+        android:background="@drawable/bg_panel_list"
+        android:elevation="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="@dimen/space_3"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/space_2"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/navStat"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFeatureSettings="tnum"
+                android:textAppearance="@style/TextAppearance.G.Title"
+                android:textColor="?attr/gTextPrimary" />
+
+            <TextView
+                android:id="@+id/navSub"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textAppearance="@style/TextAppearance.G.Caption"
+                android:textColor="?attr/gTextSecondary" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/btnNavCancel"
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/control_lg"
+            android:layout_marginStart="@dimen/space_2"
+            android:background="@drawable/bg_fab_pill"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:minWidth="96dp"
+            android:paddingStart="@dimen/space_4"
+            android:paddingEnd="@dimen/space_4"
+            android:stateListAnimator="@animator/press"
+            android:text="Отмена"
+            android:textAppearance="@style/TextAppearance.G.Label"
+            android:textColor="?attr/gTextPrimary"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/btnNavGo"
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/control_lg"
+            android:layout_marginStart="@dimen/space_2"
+            android:background="@drawable/bg_btn_primary"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:minWidth="112dp"
+            android:paddingStart="@dimen/space_4"
+            android:paddingEnd="@dimen/space_4"
+            android:stateListAnimator="@animator/press"
+            android:text="Поехали"
+            android:textAppearance="@style/TextAppearance.G.Label"
+            android:textColor="?attr/gOnAccent"
+            android:textSize="16sp" />
     </LinearLayout>
 
     <LinearLayout

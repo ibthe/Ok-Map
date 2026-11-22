@@ -1,0 +1,559 @@
+package app.okmap
+
+import java.io.File
+import java.io.RandomAccessFile
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.channels.FileChannel
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sin
+import kotlin.math.sqrt
+
+/** Point on the road network closest to a given coordinate. [off] = metres along the segment from its node A. */
+class Snap(val seg: Int, val off: Double, val dist: Double, val lat: Double, val lon: Double)
+
+/** One piece of a route: a segment travelled from offset [from] to offset [to] (metres along A->B); [endNode] = node reached (-1 for the last leg). */
+class Leg(val seg: Int, val from: Double, val to: Double, val endNode: Int)
+
+/** Manoeuvre types of [Step.type]. */
+object Maneuver {
+    const val DEPART = 0
+    const val CONTINUE = 1
+    const val SLIGHT_LEFT = 2
+    const val SLIGHT_RIGHT = 3
+    const val LEFT = 4
+    const val RIGHT = 5
+    const val SHARP_LEFT = 6
+    const val SHARP_RIGHT = 7
+    const val UTURN = 8
+    const val ROUNDABOUT = 9
+    const val ARRIVE = 10
+}
+
+class Step(val type: Int, val text: String, val street: String, val pointIdx: Int, val exit: Int)
+
+class Route(
+    val lat: DoubleArray, val lon: DoubleArray, val cum: DoubleArray,
+    val steps: List<Step>, val seconds: Double
+) {
+    val distance: Double get() = cum[cum.size - 1]
+}
+
+/**
+ * Offline road graph (file produced by tools/build_graph.py, format "OKG2") with a car router.
+ * The file is memory-mapped, so the whole country costs almost no Java heap.
+ * Algorithm and file layout are mirrored by tools/route_check.py, which is tested in CI.
+ */
+class Graph(file: File) {
+    private val buf: ByteBuffer
+    val nodes: Int
+    val segments: Int
+    private val shapePts: Int
+    private val adjLen: Int
+    private val nameCount: Int
+    private val nameBytes: Int
+    val maxKmh: Int
+    private val lat0: Int
+    private val lon0: Int
+    private val cell: Int
+    private val gw: Int
+    private val gh: Int
+    private val cellDataLen: Int
+
+    private val oNLat: Int
+    private val oNLon: Int
+    private val oAdjStart: Int
+    private val oAdj: Int
+    private val oA: Int
+    private val oB: Int
+    private val oLen: Int
+    private val oName: Int
+    private val oSst: Int
+    private val oKmh: Int
+    private val oFlg: Int
+    private val oScnt: Int
+    private val oSlat: Int
+    private val oSlon: Int
+    private val oNameOff: Int
+    private val oNameBytes: Int
+    private val oCellStart: Int
+    private val oCellData: Int
+
+    init {
+        val raf = RandomAccessFile(file, "r")
+        buf = raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length()).order(ByteOrder.LITTLE_ENDIAN)
+        raf.close()
+        require(buf.getInt(0) == 0x32474B4F) { "graph.bin: wrong format" }
+        nodes = buf.getInt(8)
+        segments = buf.getInt(12)
+        shapePts = buf.getInt(16)
+        adjLen = buf.getInt(20)
+        nameCount = buf.getInt(24)
+        nameBytes = buf.getInt(28)
+        maxKmh = max(30, buf.getInt(32))
+        lat0 = buf.getInt(36)
+        lon0 = buf.getInt(40)
+        cell = buf.getInt(44)
+        gw = buf.getInt(48)
+        gh = buf.getInt(52)
+        cellDataLen = buf.getInt(56)
+
+        fun pad4(v: Int) = v + ((4 - v % 4) % 4)
+        var p = 80
+        oNLat = p; p += 4 * nodes
+        oNLon = p; p += 4 * nodes
+        oAdjStart = p; p += 4 * (nodes + 1)
+        oAdj = p; p += 4 * adjLen
+        oA = p; p += 4 * segments
+        oB = p; p += 4 * segments
+        oLen = p; p += 4 * segments
+        oName = p; p += 4 * segments
+        oSst = p; p += 4 * segments
+        oKmh = p; p += pad4(segments)
+        oFlg = p; p += pad4(segments)
+        oScnt = p; p += pad4(2 * segments)
+        oSlat = p; p += 4 * shapePts
+        oSlon = p; p += 4 * shapePts
+        oNameOff = p; p += 4 * (nameCount + 1)
+        oNameBytes = p; p += pad4(nameBytes)
+        oCellStart = p; p += 4 * (gw * gh + 1)
+        oCellData = p
+    }
+
+    // ---- raw accessors
+    private fun nLat(i: Int) = buf.getInt(oNLat + 4 * i) / 1e6
+    private fun nLon(i: Int) = buf.getInt(oNLon + 4 * i) / 1e6
+    private fun adjStart(i: Int) = buf.getInt(oAdjStart + 4 * i)
+    private fun adj(i: Int) = buf.getInt(oAdj + 4 * i)
+    private fun segA(k: Int) = buf.getInt(oA + 4 * k)
+    private fun segB(k: Int) = buf.getInt(oB + 4 * k)
+    private fun segLen(k: Int) = buf.getInt(oLen + 4 * k) / 10.0
+    private fun segName(k: Int) = buf.getInt(oName + 4 * k)
+    private fun segSst(k: Int) = buf.getInt(oSst + 4 * k)
+    private fun segKmh(k: Int) = buf.get(oKmh + k).toInt() and 0xFF
+    private fun segFlags(k: Int) = buf.get(oFlg + k).toInt() and 0xFF
+    private fun segCnt(k: Int) = buf.getShort(oScnt + 2 * k).toInt() and 0xFFFF
+
+    private fun canForward(k: Int) = segFlags(k) and 1 != 0     // A -> B
+    private fun canBackward(k: Int) = segFlags(k) and 2 != 0    // B -> A
+    private fun isRoundabout(k: Int) = segFlags(k) and 64 != 0
+    private fun classId(k: Int) = (segFlags(k) shr 2) and 15
+
+    fun streetName(k: Int): String {
+        val i = segName(k)
+        if (i < 0 || i >= nameCount) return ""
+        val a = buf.getInt(oNameOff + 4 * i)
+        val b = buf.getInt(oNameOff + 4 * (i + 1))
+        val bytes = ByteArray(b - a)
+        for (j in bytes.indices) bytes[j] = buf.get(oNameBytes + a + j)
+        return String(bytes, Charsets.UTF_8)
+    }
+
+    private fun ptCount(k: Int) = segCnt(k) + 2
+    private fun ptLat(k: Int, i: Int): Double = when (i) {
+        0 -> nLat(segA(k))
+        ptCount(k) - 1 -> nLat(segB(k))
+        else -> buf.getInt(oSlat + 4 * (segSst(k) + i - 1)) / 1e6
+    }
+
+    private fun ptLon(k: Int, i: Int): Double = when (i) {
+        0 -> nLon(segA(k))
+        ptCount(k) - 1 -> nLon(segB(k))
+        else -> buf.getInt(oSlon + 4 * (segSst(k) + i - 1)) / 1e6
+    }
+
+    private fun penalty(k: Int, avoidUnpaved: Boolean): Double {
+        var m = if (classId(k) == 10) 2.5 else 1.0
+        if (segFlags(k) and 128 != 0) m *= if (avoidUnpaved) 3.0 else 1.3
+        return m
+    }
+
+    private fun cost(k: Int, meters: Double, avoidUnpaved: Boolean) =
+        meters / (max(5, segKmh(k)) / 3.6) * penalty(k, avoidUnpaved)
+
+    // ------------------------------------------------------------------ snapping
+    /** Closest road segment to the point, or null if there is no road within ~6 km. */
+    fun snap(lat: Double, lon: Double): Snap? {
+        val cy = (Math.floor(lat * 1e6).toLong() - lat0) / cell
+        val cx = (Math.floor(lon * 1e6).toLong() - lon0) / cell
+        val k = cos(Math.toRadians(lat))
+        val cellMeters = cell * 1e-6 * 111320.0 * k
+        var best: Snap? = null
+        for (r in 0 until 14) {
+            for (y in (cy - r).toInt()..(cy + r).toInt()) {
+                for (x in (cx - r).toInt()..(cx + r).toInt()) {
+                    if (max(abs(y - cy.toInt()), abs(x - cx.toInt())) != r) continue
+                    if (y < 0 || y >= gh || x < 0 || x >= gw) continue
+                    val c = y * gw + x
+                    val from = buf.getInt(oCellStart + 4 * c)
+                    val to = buf.getInt(oCellStart + 4 * (c + 1))
+                    for (i in from until to) {
+                        val seg = buf.getInt(oCellData + 4 * i)
+                        val s = snapToSegment(seg, lat, lon, k)
+                        if (best == null || s.dist < best.dist) best = s
+                    }
+                }
+            }
+            val b = best
+            if (b != null && b.dist <= r * cellMeters) break
+        }
+        return best
+    }
+
+    private fun snapToSegment(seg: Int, lat: Double, lon: Double, k: Double): Snap {
+        var off = 0.0
+        var bestD = Double.MAX_VALUE
+        var bestOff = 0.0
+        var bLat = 0.0
+        var bLon = 0.0
+        val n = ptCount(seg)
+        var pLat = ptLat(seg, 0)
+        var pLon = ptLon(seg, 0)
+        for (i in 1 until n) {
+            val qLat = ptLat(seg, i)
+            val qLon = ptLon(seg, i)
+            val ax = (pLon - lon) * k
+            val ay = pLat - lat
+            val dx = (qLon - pLon) * k
+            val dy = qLat - pLat
+            val l2 = dx * dx + dy * dy
+            val t = if (l2 == 0.0) 0.0 else max(0.0, min(1.0, -(ax * dx + ay * dy) / l2))
+            val d = hypot(ax + t * dx, ay + t * dy) * 111320.0
+            val sl = haversine(pLat, pLon, qLat, qLon)
+            if (d < bestD) {
+                bestD = d
+                bestOff = off + t * sl
+                bLat = pLat + (qLat - pLat) * t
+                bLon = pLon + (qLon - pLon) * t
+            }
+            off += sl
+            pLat = qLat
+            pLon = qLon
+        }
+        return Snap(seg, bestOff, bestD, bLat, bLon)
+    }
+
+    // ------------------------------------------------------------------ routing (A*)
+    private class Heap {
+        var keys = DoubleArray(1024)
+        var vals = IntArray(1024)
+        var size = 0
+        var topKey = 0.0
+
+        fun push(k: Double, v: Int) {
+            if (size == keys.size) {
+                keys = keys.copyOf(size * 2)
+                vals = vals.copyOf(size * 2)
+            }
+            var i = size++
+            while (i > 0) {
+                val p = (i - 1) / 2
+                if (keys[p] <= k) break
+                keys[i] = keys[p]
+                vals[i] = vals[p]
+                i = p
+            }
+            keys[i] = k
+            vals[i] = v
+        }
+
+        /** removes the smallest entry; its key is left in [topKey] */
+        fun pop(): Int {
+            val res = vals[0]
+            topKey = keys[0]
+            size--
+            if (size > 0) {
+                val k = keys[size]
+                val v = vals[size]
+                var i = 0
+                while (true) {
+                    var c = 2 * i + 1
+                    if (c >= size) break
+                    if (c + 1 < size && keys[c + 1] < keys[c]) c++
+                    if (keys[c] >= k) break
+                    keys[i] = keys[c]
+                    vals[i] = vals[c]
+                    i = c
+                }
+                keys[i] = k
+                vals[i] = v
+            }
+            return res
+        }
+    }
+
+    /** Fastest route between two snapped points, or null if they are not connected (one-way streets respected). */
+    fun route(s: Snap, e: Snap, avoidUnpaved: Boolean): List<Leg>? {
+        val inf = Double.MAX_VALUE
+        val g = DoubleArray(nodes) { inf }
+        val prevNode = IntArray(nodes) { -1 }
+        val prevSeg = IntArray(nodes) { -1 }
+        val closed = BooleanArray(nodes)
+        val heap = Heap()
+        val vmax = maxKmh / 3.6
+
+        fun h(n: Int) = haversine(nLat(n), nLon(n), e.lat, e.lon) / vmax
+
+        val ks = s.seg
+        val ke = e.seg
+        val ls = segLen(ks)
+        val le = segLen(ke)
+        var best = inf
+        var bestEnd = -1
+        var direct = false
+
+        if (ks == ke) {
+            if (e.off >= s.off && canForward(ks)) { best = cost(ks, e.off - s.off, avoidUnpaved); direct = true }
+            else if (e.off < s.off && canBackward(ks)) { best = cost(ks, s.off - e.off, avoidUnpaved); direct = true }
+        }
+        if (canBackward(ks)) {
+            val a = segA(ks)
+            g[a] = cost(ks, s.off, avoidUnpaved)
+            heap.push(g[a] + h(a), a)
+        }
+        if (canForward(ks)) {
+            val b = segB(ks)
+            val c = cost(ks, ls - s.off, avoidUnpaved)
+            if (c < g[b]) { g[b] = c; heap.push(c + h(b), b) }
+        }
+        var endA = inf   // arrive at the end point through node A (travelling A -> B)
+        var endB = inf   // arrive through node B (travelling B -> A)
+        if (canForward(ke)) endA = cost(ke, e.off, avoidUnpaved)
+        if (canBackward(ke)) endB = cost(ke, le - e.off, avoidUnpaved)
+        val nodeEndA = segA(ke)
+        val nodeEndB = segB(ke)
+
+        while (heap.size > 0) {
+            val u = heap.pop()
+            if (heap.topKey >= best) break
+            if (closed[u]) continue
+            closed[u] = true
+            if (u == nodeEndA && endA < inf && g[u] + endA < best) { best = g[u] + endA; bestEnd = u; direct = false }
+            if (u == nodeEndB && endB < inf && g[u] + endB < best) { best = g[u] + endB; bestEnd = u; direct = false }
+            val from = adjStart(u)
+            val to = adjStart(u + 1)
+            for (i in from until to) {
+                val k = adj(i)
+                val v: Int
+                if (segA(k) == u && canForward(k)) v = segB(k)
+                else if (segB(k) == u && canBackward(k)) v = segA(k)
+                else continue
+                if (closed[v]) continue
+                val c = g[u] + cost(k, segLen(k), avoidUnpaved)
+                if (c < g[v]) {
+                    g[v] = c
+                    prevNode[v] = u
+                    prevSeg[v] = k
+                    heap.push(c + h(v), v)
+                }
+            }
+        }
+
+        if (direct) return listOf(Leg(ks, s.off, e.off, -1))
+        if (bestEnd < 0) return null
+
+        val legs = ArrayList<Leg>()
+        // last leg: from the end node to the end point
+        legs.add(if (bestEnd == nodeEndA) Leg(ke, 0.0, e.off, -1) else Leg(ke, le, e.off, -1))
+        var u = bestEnd
+        while (prevNode[u] >= 0) {
+            val k = prevSeg[u]
+            val p = prevNode[u]
+            val l = segLen(k)
+            legs.add(if (segA(k) == p) Leg(k, 0.0, l, u) else Leg(k, l, 0.0, u))
+            u = p
+        }
+        // first leg: from the start point to the start node u
+        legs.add(if (u == segA(ks)) Leg(ks, s.off, 0.0, u) else Leg(ks, s.off, ls, u))
+        legs.reverse()
+        return legs
+    }
+
+    // ------------------------------------------------------------------ route geometry + instructions
+    private class DList {
+        var a = DoubleArray(256)
+        var n = 0
+        fun add(v: Double) {
+            if (n == a.size) a = a.copyOf(n * 2)
+            a[n++] = v
+        }
+    }
+
+    private fun appendSlice(k: Int, from: Double, to: Double, la: DList, lo: DList) {
+        val m = ptCount(k)
+        val cl = DoubleArray(m)
+        for (i in 1 until m) cl[i] = cl[i - 1] + haversine(ptLat(k, i - 1), ptLon(k, i - 1), ptLat(k, i), ptLon(k, i))
+        val total = cl[m - 1]
+        fun interp(off0: Double, out: DoubleArray) {
+            val off = max(0.0, min(total, off0))
+            var i = 1
+            while (i < m - 1 && cl[i] < off) i++
+            val span = cl[i] - cl[i - 1]
+            val t = if (span <= 0.0) 0.0 else (off - cl[i - 1]) / span
+            out[0] = ptLat(k, i - 1) + (ptLat(k, i) - ptLat(k, i - 1)) * t
+            out[1] = ptLon(k, i - 1) + (ptLon(k, i) - ptLon(k, i - 1)) * t
+        }
+
+        val lowO = min(from, to)
+        val highO = max(from, to)
+        val tl = ArrayList<Double>()
+        val tn = ArrayList<Double>()
+        val tmp = DoubleArray(2)
+        interp(lowO, tmp); tl.add(tmp[0]); tn.add(tmp[1])
+        for (i in 1 until m - 1) if (cl[i] > lowO + 0.5 && cl[i] < highO - 0.5) { tl.add(ptLat(k, i)); tn.add(ptLon(k, i)) }
+        interp(highO, tmp); tl.add(tmp[0]); tn.add(tmp[1])
+        if (from > to) { tl.reverse(); tn.reverse() }
+        for (i in tl.indices) {
+            if (la.n > 0 && abs(la.a[la.n - 1] - tl[i]) < 1e-9 && abs(lo.a[lo.n - 1] - tn[i]) < 1e-9) continue
+            la.add(tl[i]); lo.add(tn[i])
+        }
+    }
+
+    private fun outwardOk(k: Int, node: Int) =
+        (segA(k) == node && canForward(k)) || (segB(k) == node && canBackward(k))
+
+    /** Number of other drivable ways leaving [node] except the two route segments. */
+    private fun alternatives(node: Int, inSeg: Int, outSeg: Int): Int {
+        var n = 0
+        for (i in adjStart(node) until adjStart(node + 1)) {
+            val k = adj(i)
+            if (k != inSeg && k != outSeg && outwardOk(k, node)) n++
+        }
+        return n
+    }
+
+    private fun hasExitRoad(node: Int): Boolean {
+        for (i in adjStart(node) until adjStart(node + 1)) {
+            val k = adj(i)
+            if (!isRoundabout(k) && outwardOk(k, node)) return true
+        }
+        return false
+    }
+
+    private fun legEndNode(l: Leg): Int = l.endNode
+
+    private fun bearing(la1: Double, lo1: Double, la2: Double, lo2: Double): Double {
+        val p1 = Math.toRadians(la1)
+        val p2 = Math.toRadians(la2)
+        val dl = Math.toRadians(lo2 - lo1)
+        val y = sin(dl) * cos(p2)
+        val x = cos(p1) * sin(p2) - sin(p1) * cos(p2) * cos(dl)
+        return (Math.toDegrees(atan2(y, x)) + 360.0) % 360.0
+    }
+
+    private fun turnAngle(inB: Double, outB: Double): Double {
+        var d = (outB - inB + 540.0) % 360.0 - 180.0
+        if (d <= -180.0) d += 360.0
+        return d
+    }
+
+    private fun maneuverText(type: Int, street: String, exit: Int): String {
+        val onto = if (street.isNotEmpty()) " на $street" else ""
+        return when (type) {
+            Maneuver.DEPART -> if (street.isNotEmpty()) "Начните движение по $street" else "Начните движение"
+            Maneuver.CONTINUE -> if (street.isNotEmpty()) "Продолжайте движение по $street" else "Продолжайте движение прямо"
+            Maneuver.SLIGHT_LEFT -> "Плавно поверните налево$onto"
+            Maneuver.SLIGHT_RIGHT -> "Плавно поверните направо$onto"
+            Maneuver.LEFT -> "Поверните налево$onto"
+            Maneuver.RIGHT -> "Поверните направо$onto"
+            Maneuver.SHARP_LEFT -> "Резко поверните налево$onto"
+            Maneuver.SHARP_RIGHT -> "Резко поверните направо$onto"
+            Maneuver.UTURN -> "Развернитесь"
+            Maneuver.ROUNDABOUT -> "На круговом движении съезжайте на $exit-м съезде$onto"
+            else -> "Вы прибыли в пункт назначения"
+        }
+    }
+
+    fun buildRoute(legs: List<Leg>): Route {
+        val la = DList()
+        val lo = DList()
+        val boundary = IntArray(legs.size)         // index of the last point of each leg in the polyline
+        var seconds = 0.0
+        for ((i, l) in legs.withIndex()) {
+            appendSlice(l.seg, l.from, l.to, la, lo)
+            boundary[i] = la.n - 1
+            seconds += abs(l.to - l.from) / (max(5, segKmh(l.seg)) / 3.6)
+        }
+        val n = la.n
+        val cum = DoubleArray(n)
+        for (i in 1 until n) cum[i] = cum[i - 1] + haversine(la.a[i - 1], lo.a[i - 1], la.a[i], lo.a[i])
+
+        val steps = ArrayList<Step>()
+        steps.add(Step(Maneuver.DEPART, maneuverText(Maneuver.DEPART, streetName(legs[0].seg), 0),
+            streetName(legs[0].seg), 0, 0))
+
+        fun bearingIn(idx: Int): Double {            // direction of travel in the last ~20 m before point idx
+            var j = idx
+            while (j > 0 && cum[idx] - cum[j] < 20.0) j--
+            return bearing(la.a[j], lo.a[j], la.a[idx], lo.a[idx])
+        }
+
+        fun bearingOut(idx: Int): Double {           // direction of travel in the first ~20 m after point idx
+            var j = idx
+            while (j < n - 1 && cum[j] - cum[idx] < 20.0) j++
+            return bearing(la.a[idx], lo.a[idx], la.a[j], lo.a[j])
+        }
+
+        var inRound = isRoundabout(legs[0].seg)
+        for (i in 0 until legs.size - 1) {
+            val a = legs[i]
+            val b = legs[i + 1]
+            val node = legEndNode(a)
+            val idx = boundary[i]
+            val nameA = streetName(a.seg)
+            val nameB = streetName(b.seg)
+            val rb = isRoundabout(b.seg)
+            val ra = isRoundabout(a.seg)
+
+            if (rb && !ra) {                         // entering a roundabout: count the exit up front
+                var exits = 0
+                var exitName = nameB
+                var j = i + 1
+                while (j < legs.size) {
+                    if (j + 1 >= legs.size) break
+                    val nx = legs[j + 1]
+                    val nd = legEndNode(legs[j])
+                    if (!isRoundabout(nx.seg)) { exitName = streetName(nx.seg); break }
+                    if (hasExitRoad(nd)) exits++
+                    j++
+                }
+                steps.add(Step(Maneuver.ROUNDABOUT, maneuverText(Maneuver.ROUNDABOUT, exitName, exits + 1), exitName, idx, exits + 1))
+                inRound = true
+                continue
+            }
+            if (inRound) {
+                if (!rb) inRound = false             // leaving: already announced at the entry
+                continue
+            }
+            val ang = turnAngle(bearingIn(idx), bearingOut(idx))
+            val aa = abs(ang)
+            val alts = alternatives(node, a.seg, b.seg)
+            val nameChanged = nameB.isNotEmpty() && nameB != nameA
+            val type = when {
+                aa > 160.0 -> Maneuver.UTURN
+                aa >= 120.0 -> if (ang < 0) Maneuver.SHARP_LEFT else Maneuver.SHARP_RIGHT
+                aa >= 50.0 -> if (ang < 0) Maneuver.LEFT else Maneuver.RIGHT
+                aa >= 22.0 && (alts > 0 || nameChanged) -> if (ang < 0) Maneuver.SLIGHT_LEFT else Maneuver.SLIGHT_RIGHT
+                nameChanged && alts > 0 -> Maneuver.CONTINUE
+                else -> -1
+            }
+            if (type >= 0) steps.add(Step(type, maneuverText(type, nameB, 0), nameB, idx, 0))
+        }
+        steps.add(Step(Maneuver.ARRIVE, maneuverText(Maneuver.ARRIVE, "", 0), "", n - 1, 0))
+        return Route(la.a.copyOf(n), lo.a.copyOf(n), cum, steps, seconds)
+    }
+
+    companion object {
+        fun haversine(la1: Double, lo1: Double, la2: Double, lo2: Double): Double {
+            val p = Math.PI / 180.0
+            val a = sin((la2 - la1) * p / 2).let { it * it } +
+                cos(la1 * p) * cos(la2 * p) * sin((lo2 - lo1) * p / 2).let { it * it }
+            return 12742000.0 * Math.asin(min(1.0, sqrt(a)))
+        }
+    }
+}

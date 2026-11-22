@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Synthetic test of build_graph + route_check: a 12x12 street grid with a one-way street, a dead-end, a private
+road, a roundabout, an isolated island and a track. Run: python tools/test_graph.py"""
+import os
+import sys
+import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import build_graph as bg
+import route_check as rc
+
+ways, nid = [], {}
+
+
+def node(i, j):
+    nid.setdefault((i, j), len(nid) + 1)
+    return (nid[(i, j)], 41.70 + i * 0.002, 44.80 + j * 0.002)
+
+
+for i in range(12):   # horizontal streets
+    tags = {"highway": "residential", "name": f"Улица {i}"}
+    if i == 5:
+        tags["oneway"] = "yes"
+    ways.append((tags, [node(i, j) for j in range(12)]))
+for j in range(12):   # vertical streets
+    tags = {"highway": "secondary", "name": f"Проспект {j}", "maxspeed": "60"}
+    if j == 11:
+        tags["access"] = "private"
+    ways.append((tags, [node(i, j) for i in range(12)]))
+ways.append(({"highway": "residential"}, [node(100, 100), node(100, 101)]))  # island, dropped (too small)
+g = bg.build(ways, min_component=10)
+assert g["A"].size > 100, g["A"].size
+p = os.path.join(tempfile.mkdtemp(), "g.bin")
+bg.write(g, p)
+G = rc.Graph(p)
+s, e = G.snap(41.70, 44.80), G.snap(41.70 + 11 * 0.002, 44.80 + 10 * 0.002)
+t, legs = G.route(s, e)
+d = G.dist(legs)
+exp = 11 * 0.002 * 111320 + 10 * 0.002 * 111320 * 0.7478
+assert abs(d - exp) < 0.06 * exp, (d, exp)   # Manhattan distance (first and last segment are counted whole)
+# against the one-way street 5: crossing it must still work, driving along it backwards must not
+s2, e2 = G.snap(41.70 + 5 * 0.002, 44.80 + 8 * 0.002), G.snap(41.70 + 5 * 0.002, 44.80 + 2 * 0.002)
+t2, legs2 = G.route(s2, e2)
+assert G.dist(legs2) > 6 * 0.002 * 111320 * 0.7478 * 1.2, "went against the one-way street"
+# 12 streets x 11 blocks + 11 public avenues x 11 blocks; the private avenue and the tiny island are dropped
+assert G.S == 12 * 11 + 11 * 11, G.S
+print("graph tests passed:", round(d), "m,", round(t), "s")

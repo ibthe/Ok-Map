@@ -35,5 +35,10 @@
             android:name=".TrackService"
             android:exported="false"
             android:foregroundServiceType="location" />
+
+        <service
+            android:name=".NavService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
     </application>
 </manifest>
