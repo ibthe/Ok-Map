@@ -247,7 +247,6 @@
             android:background="@drawable/bg_chip"
             android:gravity="center"
             android:includeFontPadding="false"
-            android:selected="true"
             android:textColor="?attr/gOnAccent"
             android:textSize="36sp" />
 

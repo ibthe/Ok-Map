@@ -79,6 +79,7 @@ class Navigator(
     private val btnGo: TextView = act.findViewById(R.id.btnNavGo)
 
     init {
+        navArrow.isSelected = true      // accent "pressed-in" look of the arrow tile (bg_chip, selected state)
         btnCancel.setOnClickListener { stop() }
         btnGo.setOnClickListener { start() }
     }
