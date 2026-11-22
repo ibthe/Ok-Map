@@ -15,4 +15,10 @@
     <attr name="gOnAccentContainer" format="color" />
     <attr name="gCrosshair" format="color" />
     <attr name="gCrosshairHalo" format="color" />
+    <attr name="gRaisedTop" format="color" />
+    <attr name="gRaisedBottom" format="color" />
+    <attr name="gRaisedEdge" format="color" />
+    <attr name="gAccentTop" format="color" />
+    <attr name="gAccentBottom" format="color" />
+    <attr name="gAccentEdge" format="color" />
 </resources>

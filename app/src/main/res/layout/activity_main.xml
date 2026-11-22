@@ -3,6 +3,7 @@
      12 dp between neighbouring controls, 48 dp touch targets, 56 dp primary controls. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
@@ -34,6 +35,7 @@
             android:layout_height="@dimen/control_lg"
             android:background="@drawable/bg_panel_pill"
             android:elevation="6dp"
+            android:paddingBottom="3dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
@@ -72,11 +74,30 @@
                 android:visibility="gone" />
         </LinearLayout>
 
+        <!-- quick filters for the road: one tap shows / hides a POI category -->
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_1"
+            android:clipChildren="false"
+            android:clipToPadding="false"
+            android:paddingTop="@dimen/space_1"
+            android:paddingBottom="@dimen/space_2"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/chipRow"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:clipChildren="false"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
+
         <ListView
             android:id="@+id/lvResults"
             android:layout_width="match_parent"
             android:layout_height="320dp"
-            android:layout_marginTop="@dimen/space_2"
+            android:layout_marginTop="@dimen/space_1"
             android:background="@drawable/bg_panel_list"
             android:clipToOutline="true"
             android:divider="?attr/gStroke"
@@ -116,6 +137,7 @@
             android:layout_width="@dimen/control_sm"
             android:layout_height="@dimen/control_sm"
             android:background="@drawable/bg_fab"
+            android:stateListAnimator="@animator/press"
             android:contentDescription="@string/btn_fit"
             android:elevation="6dp"
             android:src="@drawable/ic_fit" />
@@ -126,6 +148,7 @@
             android:layout_height="@dimen/control_sm"
             android:layout_marginTop="@dimen/space_3"
             android:background="@drawable/bg_fab"
+            android:stateListAnimator="@animator/press"
             android:contentDescription="@string/btn_location"
             android:elevation="6dp"
             android:src="@drawable/ic_my_location"
@@ -147,6 +170,7 @@
             android:layout_width="@dimen/control_lg"
             android:layout_height="@dimen/control_lg"
             android:background="@drawable/bg_fab"
+            android:stateListAnimator="@animator/press"
             android:contentDescription="@string/btn_menu"
             android:elevation="6dp"
             android:src="@drawable/ic_menu" />
@@ -158,6 +182,9 @@
             android:layout_marginStart="@dimen/space_3"
             android:layout_weight="1"
             android:background="@drawable/bg_btn_primary"
+            android:outlineSpotShadowColor="?attr/gAccentEdge"
+            android:stateListAnimator="@animator/press"
+            tools:targetApi="28"
             android:clickable="true"
             android:contentDescription="@string/btn_point"
             android:elevation="6dp"
@@ -181,6 +208,17 @@
                 android:textColor="?attr/gOnAccent"
                 android:textSize="16sp" />
         </LinearLayout>
+
+        <ImageButton
+            android:id="@+id/btnRec"
+            android:layout_width="@dimen/control_lg"
+            android:layout_height="@dimen/control_lg"
+            android:layout_marginStart="@dimen/space_3"
+            android:background="@drawable/bg_fab"
+            android:contentDescription="@string/btn_rec"
+            android:elevation="6dp"
+            android:src="@drawable/ic_rec"
+            android:stateListAnimator="@animator/press" />
     </LinearLayout>
 
     <LinearLayout

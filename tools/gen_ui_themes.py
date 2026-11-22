@@ -13,7 +13,8 @@ if bad:
 
 RES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app", "src", "main", "res")
 ATTRS = ["gSurface", "gPanel", "gStroke", "gFab", "gDialog", "gTextPrimary", "gTextSecondary", "gHint", "gIcon",
-         "gAccent", "gOnAccent", "gAccentContainer", "gOnAccentContainer", "gCrosshair", "gCrosshairHalo"]
+         "gAccent", "gOnAccent", "gAccentContainer", "gOnAccentContainer", "gCrosshair", "gCrosshairHalo",
+         "gRaisedTop", "gRaisedBottom", "gRaisedEdge", "gAccentTop", "gAccentBottom", "gAccentEdge"]
 CAP = {"forest": "Forest", "ocean": "Ocean", "sand": "Sand", "dusk": "Dusk", "graphite": "Graphite"}
 
 
@@ -28,6 +29,12 @@ def a(alpha, h):
     return "#%02X%s" % (alpha, h.lstrip("#").upper())
 
 
+def mix(a, b, t):
+    """a moved towards b by t (0..1); both '#RRGGBB'"""
+    x, y = T.hex2rgb(a), T.hex2rgb(b)
+    return "#%02X%02X%02X" % tuple(round(x[i] + (y[i] - x[i]) * t) for i in range(3))
+
+
 def values(p, dark):
     stroke = a(0x24, "#FFFFFF") if dark else a(0x1A, p["text"])
     return {
@@ -36,6 +43,13 @@ def values(p, dark):
         "gTextSecondary": p["text2"].upper(), "gHint": p["hint"].upper(), "gIcon": p["icon"].upper(),
         "gAccent": p["accent"].upper(), "gOnAccent": p["on_accent"].upper(),
         "gAccentContainer": p["container"].upper(), "gOnAccentContainer": p["on_container"].upper(),
+        # soft-3D "key" buttons: lit top, shaded bottom, darker rim that reads as the key's thickness
+        "gRaisedTop": a(0xFA, mix(p["panel"], "#FFFFFF", .10 if dark else .65)),
+        "gRaisedBottom": a(0xFA, mix(p["panel"], "#000000", .22 if dark else .07)),
+        "gRaisedEdge": mix(p["panel"], "#000000", .55 if dark else .22),
+        "gAccentTop": mix(p["accent"], "#FFFFFF", .10 if dark else .18),
+        "gAccentBottom": mix(p["accent"], "#000000", .14),
+        "gAccentEdge": mix(p["accent"], "#000000", .38 if dark else .34),
         "gCrosshair": p["crosshair"].upper(), "gCrosshairHalo": a(0xCC, p["surface"]),
     }
 
@@ -138,7 +152,19 @@ base = '''    <!-- type scale (sp): 12 caption / 14 label / 16 body / 20 title; 
         <item name="android:textAppearance">@style/TextAppearance.G.BodySmall</item>
     </style>
 
+    <style name="ShapeAppearanceOverlay.G.Sheet" parent="ShapeAppearanceOverlay.Material3.Corner.Top">
+        <item name="cornerSize">28dp</item>
+    </style>
+    <style name="Widget.G.BottomSheet" parent="Widget.Material3.BottomSheet">
+        <item name="backgroundTint">?attr/gDialog</item>
+        <item name="shapeAppearanceOverlay">@style/ShapeAppearanceOverlay.G.Sheet</item>
+    </style>
+    <style name="ThemeOverlay.G.BottomSheet" parent="ThemeOverlay.Material3.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/Widget.G.BottomSheet</item>
+    </style>
+
     <style name="Base.Theme.OkMap" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="bottomSheetDialogTheme">@style/ThemeOverlay.G.BottomSheet</item>
         <item name="textAppearanceHeadlineSmall">@style/TextAppearance.G.Title</item>
         <item name="textAppearanceBodyLarge">@style/TextAppearance.G.Body</item>
         <item name="textAppearanceBodyMedium">@style/TextAppearance.G.BodySmall</item>

@@ -1,9 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#33FFFFFF">
-    <item>
-        <shape android:shape="rectangle">
-            <solid android:color="?attr/gAccent" />
-            <corners android:radius="@dimen/radius_pill" />
-        </shape>
-    </item>
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#26808080">
+  <item>
+    <selector>
+      <item android:state_pressed="true">
+    <layer-list>
+      <item><shape android:shape="rectangle"><corners android:radius="@dimen/radius_pill" /><solid android:color="?attr/gAccentEdge" /></shape></item>
+      <item android:top="2dp"><shape android:shape="rectangle"><corners android:radius="@dimen/radius_pill" /><gradient android:angle="90" android:startColor="?attr/gAccentBottom" android:endColor="?attr/gAccentTop" /></shape></item>
+    </layer-list>
+      </item>
+      <item>
+    <layer-list>
+      <item><shape android:shape="rectangle"><corners android:radius="@dimen/radius_pill" /><solid android:color="?attr/gAccentEdge" /></shape></item>
+      <item android:bottom="3dp"><shape android:shape="rectangle"><corners android:radius="@dimen/radius_pill" /><gradient android:angle="270" android:startColor="?attr/gAccentTop" android:endColor="?attr/gAccentBottom" /></shape></item>
+    </layer-list>
+      </item>
+    </selector>
+  </item>
 </ripple>

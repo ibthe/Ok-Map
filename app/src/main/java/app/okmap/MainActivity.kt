@@ -16,6 +16,9 @@ import android.net.Uri
 import android.os.Build
 import android.graphics.Color
 import android.os.Bundle
+import android.widget.LinearLayout
+import android.widget.ImageButton
+import android.view.Gravity
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -192,6 +195,9 @@ class MainActivity : AppCompatActivity() {
         mapView.addOnDidFailLoadingMapListener { msg -> errors.add(msg ?: "?") }
 
         findViewById<View>(R.id.btnMenu).setOnClickListener { showMenu() }
+        findViewById<View>(R.id.btnRec).setOnClickListener { toggleRecording() }
+        buildChips()
+        updateRecButton()
         findViewById<View>(R.id.btnPoint).setOnClickListener {
             val c = map?.cameraPosition?.target
             if (c != null) addWaypointDialog(c)
@@ -486,6 +492,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateInfo() {
+        updateRecButton()
         val m = map ?: return
         val c = m.cameraPosition.target ?: return
         val sb = StringBuilder(Geo.fmtCoord(c.latitude, c.longitude))
@@ -630,67 +637,219 @@ class MainActivity : AppCompatActivity() {
 
     // ============================================================ menu
 
-    private infix fun String.act(a: () -> Unit): Pair<String, () -> Unit> = Pair(this, a)
+    // ------------------------------------------------------------------ menu (bottom sheet with 4 categories)
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    private fun showMenu() {
-        val langs = enabledLanguages().joinToString("/") { it.name }.ifEmpty { "выкл" }
-        val rec = TrackService.running
-        val hasRelief = File(filesDir, "relief.mbtiles").exists()
-        val themeName = when (themeMode()) { "light" -> "светлая"; "dark" -> "тёмная"; else -> "как в системе" }
-        val ct = COLOR_THEMES.first { it.id == colorTheme() }
-        // grouped by purpose: map, look, my data, tools, files, service
-        val entries: List<Pair<String, () -> Unit>> = listOf(
-            "Языки названий ($langs)" act { showLanguageDialog() },
-            "Категории POI" act { showPoiDialog() },
-            ("Рельеф: " + if (!hasRelief) "нет данных" else if (prefs.getBoolean("relief_on", true)) "вкл" else "выкл") act {
-                prefs.edit().putBoolean("relief_on", !prefs.getBoolean("relief_on", true)).apply()
-                style?.let { applyRelief(it) }
-            },
-            "Цветовая тема: ${ct.title}" act { showColorThemeDialog() },
-            "Яркость: $themeName" act {
-                val next = when (themeMode()) { "auto" -> "light"; "light" -> "dark"; else -> "auto" }
-                prefs.edit().putString("theme_mode", next).apply()
-                applyThemeMode(next)   // recreates the activity: UI and map style both switch
-            },
-            "Мои точки" act { showWaypoints() },
-            (if (rec) "■ Остановить запись трека" else "● Начать запись трека") act { toggleRecording() },
-            "Мои треки" act { showTracks() },
-            ("Линейка: " + if (rulerOn) "выключить" else "включить") act { rulerOn = !rulerOn; if (!rulerOn) rulerPts.clear(); refreshRuler() },
-            "Перейти к координатам" act { gotoCoordinatesDialog() },
-            "Экспорт GPX (точки и треки)" act { exportLauncher.launch("okmap-" + SimpleDateFormat("yyyyMMdd", Locale.US).format(Date()) + ".gpx") },
-            "Импорт GPX" act { importLauncher.launch(arrayOf("*/*")) },
-            "Справка" act { showInfo() },
-            "Диагностика" act { showDiagnostics() },
-            ("Простые подписи (отладка): " + if (prefs.getBoolean("labels_simple", false)) "вкл" else "выкл") act {
-                prefs.edit().putBoolean("labels_simple", !prefs.getBoolean("labels_simple", false)).apply()
-                style?.let { applyLabels(it) }
-            }
-        )
-        MaterialAlertDialogBuilder(this)
-            .setItems(entries.map { it.first }.toTypedArray()) { _, which -> entries[which].second() }
-            .show()
+    private fun themeColor(attr: Int): Int {
+        val tv = android.util.TypedValue()
+        theme.resolveAttribute(attr, tv, true)
+        return tv.data
     }
 
-    /** Five colour themes; the list shows a coloured dot with the theme's accent next to each name. */
-    private fun showColorThemeDialog() {
-        val cur = COLOR_THEMES.indexOfFirst { it.id == colorTheme() }
-        val items = COLOR_THEMES.map {
-            val sp = android.text.SpannableStringBuilder("●  ${it.title}\n${it.about}")
-            sp.setSpan(android.text.style.ForegroundColorSpan(Color.parseColor(it.swatch)), 0, 1, 0)
-            sp.setSpan(android.text.style.RelativeSizeSpan(1.25f), 0, 1, 0)
-            sp.setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 3, 3 + it.title.length, 0)
-            sp.setSpan(android.text.style.RelativeSizeSpan(0.85f), 4 + it.title.length, sp.length, 0)
-            sp as CharSequence
-        }.toTypedArray()
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Цветовая тема")
-            .setSingleChoiceItems(items, cur) { d, which ->
-                prefs.edit().putString("color_theme", COLOR_THEMES[which].id).apply()
-                d.dismiss()
-                recreate()   // UI theme and map style are applied together
+    private fun label(text: String, size: Float, attr: Int, medium: Boolean = false) = TextView(this).apply {
+        this.text = text
+        textSize = size
+        setTextColor(themeColor(attr))
+        if (medium) typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+    }
+
+    private fun divider() = View(this).apply {
+        setBackgroundColor(themeColor(R.attr.gStroke))
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
+    }
+
+    /** One 56 dp row: title on the left, current value and a chevron on the right. */
+    private fun menuRow(title: String, value: String? = null, onClick: () -> Unit): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(56)
+            setPadding(dp(4), 0, dp(4), 0)
+            val tv = android.util.TypedValue()
+            theme.resolveAttribute(android.R.attr.selectableItemBackground, tv, true)
+            setBackgroundResource(tv.resourceId)
+            setOnClickListener { onClick() }
+        }
+        row.addView(label(title, 16f, R.attr.gTextPrimary), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        if (value != null) row.addView(label(value, 14f, R.attr.gTextSecondary).apply { setPadding(dp(8), 0, dp(4), 0) })
+        row.addView(label("›", 22f, R.attr.gHint).apply { setPadding(dp(8), 0, dp(4), 0) })
+        return row
+    }
+
+    private fun menuSwitch(title: String, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(56)
+            setPadding(dp(4), 0, dp(4), 0)
+        }
+        row.addView(label(title, 16f, if (enabled) R.attr.gTextPrimary else R.attr.gHint),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val sw = com.google.android.material.materialswitch.MaterialSwitch(this).apply {
+            isChecked = checked
+            isEnabled = enabled
+            setOnCheckedChangeListener { _, on -> onChange(on) }
+        }
+        row.addView(sw)
+        row.setOnClickListener { if (enabled) sw.toggle() }
+        return row
+    }
+
+    private fun showMenu() {
+        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(24))
+        }
+        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; minimumHeight = dp(320) }
+        val titles = listOf("Карта", "Данные", "Вид", "Ещё")
+
+        fun add(v: View, last: Boolean = false) { content.addView(v); if (!last) content.addView(divider()) }
+        fun act(a: () -> Unit): () -> Unit = { sheet.dismiss(); a() }
+
+        fun page(i: Int) {
+            content.removeAllViews()
+            prefs.edit().putInt("menu_tab", i).apply()
+            when (i) {
+                0 -> {
+                    val langs = enabledLanguages().joinToString(" ") { it.name }
+                    val cats = (prefs.getStringSet("poi_cats", emptySet()) ?: emptySet()).size
+                    add(menuRow("Языки названий", langs, act { showLanguageDialog() }))
+                    add(menuRow("Категории на карте", if (cats == 0) "все" else "$cats", act { showPoiDialog() }))
+                    add(menuSwitch("Рельеф: тени гор", prefs.getBoolean("relief_on", true) && hasRelief, hasRelief) { on ->
+                        prefs.edit().putBoolean("relief_on", on).apply(); style?.let { applyRelief(it) }
+                    })
+                    add(menuSwitch("Линейка", rulerOn) { on ->
+                        rulerOn = on; if (!on) rulerPts.clear(); refreshRuler(); if (on) sheet.dismiss()
+                    })
+                    add(menuRow("Перейти к координатам", null, act { gotoCoordinatesDialog() }), true)
+                }
+                1 -> {
+                    add(menuRow("Мои точки", "${userDb.waypoints().size}", act { showWaypoints() }))
+                    add(menuRow("Мои треки", "${userDb.tracks().size}", act { showTracks() }))
+                    add(menuRow("Экспорт GPX", null, act {
+                        exportLauncher.launch("okmap-" + SimpleDateFormat("yyyyMMdd", Locale.US).format(Date()) + ".gpx")
+                    }))
+                    add(menuRow("Импорт GPX", null, act { importLauncher.launch(arrayOf("*/*")) }), true)
+                }
+                2 -> appearancePage(content, sheet)
+                else -> {
+                    add(menuRow("Справка", null, act { showInfo() }))
+                    add(menuRow("Диагностика", null, act { showDiagnostics() }))
+                    add(menuSwitch("Простые подписи (отладка)", prefs.getBoolean("labels_simple", false)) { on ->
+                        prefs.edit().putBoolean("labels_simple", on).apply(); style?.let { applyLabels(it) }
+                    }, true)
+                }
             }
-            .setNegativeButton("Отмена", null)
-            .show()
+        }
+
+        val tabs = com.google.android.material.button.MaterialButtonToggleGroup(this).apply {
+            isSingleSelection = true
+            isSelectionRequired = true
+        }
+        val ids = titles.map { View.generateViewId() }
+        titles.forEachIndexed { i, t ->
+            tabs.addView(com.google.android.material.button.MaterialButton(this, null,
+                com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                id = ids[i]; text = t; textSize = 14f; isAllCaps = false
+                layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f)
+            })
+        }
+        tabs.addOnButtonCheckedListener { _, id, checked -> if (checked) page(ids.indexOf(id)) }
+        root.addView(tabs, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { bottomMargin = dp(12) })
+        root.addView(content)
+        sheet.setContentView(root)
+        sheet.behavior.skipCollapsed = true
+        sheet.setOnShowListener { sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED }
+        tabs.check(ids[prefs.getInt("menu_tab", 0).coerceIn(0, 3)])
+        sheet.show()
+    }
+
+    /** Appearance in one compact block: brightness as a 3-way switch, colour theme as 5 round swatches. */
+    private fun appearancePage(content: LinearLayout, sheet: com.google.android.material.bottomsheet.BottomSheetDialog) {
+        content.addView(label("Яркость", 14f, R.attr.gTextSecondary, true).apply { setPadding(dp(4), dp(8), 0, dp(8)) })
+        val modes = listOf("auto" to "Авто", "light" to "День", "dark" to "Ночь")
+        val g = com.google.android.material.button.MaterialButtonToggleGroup(this).apply { isSingleSelection = true; isSelectionRequired = true }
+        val mids = modes.map { View.generateViewId() }
+        modes.forEachIndexed { i, m ->
+            g.addView(com.google.android.material.button.MaterialButton(this, null,
+                com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                id = mids[i]; text = m.second; textSize = 14f; isAllCaps = false
+                layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f)
+            })
+        }
+        g.check(mids[modes.indexOfFirst { it.first == themeMode() }.coerceAtLeast(0)])
+        g.addOnButtonCheckedListener { _, id, checked ->
+            val m = modes[mids.indexOf(id)].first
+            if (checked && m != themeMode()) { prefs.edit().putString("theme_mode", m).apply(); sheet.dismiss(); applyThemeMode(m) }
+        }
+        content.addView(g, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+        val cur = COLOR_THEMES.first { it.id == colorTheme() }
+        content.addView(label("Цветовая тема: ${cur.title}", 14f, R.attr.gTextSecondary, true).apply { setPadding(dp(4), dp(24), 0, dp(12)) })
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; clipChildren = false }
+        for (ct in COLOR_THEMES) {
+            val selected = ct.id == cur.id
+            val dot = View(this).apply {
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(Color.parseColor(if (isNight()) ct.swatchNight else ct.swatch))
+                    setStroke(dp(if (selected) 3 else 1), themeColor(if (selected) R.attr.gTextPrimary else R.attr.gStroke))
+                }
+                elevation = dp(3).toFloat()
+                contentDescription = ct.title
+                stateListAnimator = android.animation.AnimatorInflater.loadStateListAnimator(this@MainActivity, R.animator.press)
+                setOnClickListener {
+                    if (!selected) { prefs.edit().putString("color_theme", ct.id).apply(); sheet.dismiss(); recreate() }
+                }
+            }
+            val cell = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; clipChildren = false }
+            cell.addView(dot, LinearLayout.LayoutParams(dp(48), dp(48)))
+            cell.addView(label(ct.title, 12f, if (selected) R.attr.gTextPrimary else R.attr.gTextSecondary, selected)
+                .apply { setPadding(0, dp(8), 0, 0) })
+            row.addView(cell, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        content.addView(row)
+        content.addView(label(cur.about.replaceFirstChar { it.uppercase() }, 14f, R.attr.gHint).apply { setPadding(dp(4), dp(16), 0, 0) })
+    }
+
+    // ------------------------------------------------------------------ quick POI filters on the map screen
+    private fun buildChips() {
+        val row = findViewById<LinearLayout>(R.id.chipRow)
+        row.removeAllViews()
+        val sel = prefs.getStringSet("poi_cats", emptySet()) ?: emptySet()
+        for ((emoji, short, key) in QUICK_CHIPS) {
+            val on = key in sel
+            val chip = TextView(this).apply {
+                text = "$emoji  $short"
+                textSize = 14f
+                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                setTextColor(themeColor(if (on) R.attr.gOnAccent else R.attr.gTextPrimary))
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(44)
+                setPadding(dp(14), 0, dp(14), dp(3))
+                background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_chip)
+                isSelected = on
+                elevation = dp(3).toFloat()
+                stateListAnimator = android.animation.AnimatorInflater.loadStateListAnimator(this@MainActivity, R.animator.press)
+                setOnClickListener {
+                    val cur = (prefs.getStringSet("poi_cats", emptySet()) ?: emptySet()).toMutableSet()
+                    if (!cur.add(key)) cur.remove(key)
+                    prefs.edit().putStringSet("poi_cats", HashSet(cur)).apply()
+                    style?.let { applyPoiFilter(it) }
+                    buildChips()
+                }
+            }
+            row.addView(chip, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(47)).apply { marginEnd = dp(8) })
+        }
+    }
+
+    private fun updateRecButton() {
+        val b = findViewById<ImageButton>(R.id.btnRec)
+        val rec = TrackService.running
+        b.imageTintList = android.content.res.ColorStateList.valueOf(themeColor(if (rec) R.attr.gCrosshair else R.attr.gIcon))
+        b.contentDescription = if (rec) "Остановить запись трека" else "Начать запись трека"
     }
 
     private fun showLanguageDialog() {
@@ -715,6 +874,7 @@ class MainActivity : AppCompatActivity() {
                 if (isChecked) cur.add(names[which]) else cur.remove(names[which])
                 prefs.edit().putStringSet("poi_cats", HashSet(cur)).apply()
                 style?.let { applyPoiFilter(it) }
+                buildChips()
             }
             .setPositiveButton(android.R.string.ok, null).show()
     }
@@ -1023,14 +1183,22 @@ class MainActivity : AppCompatActivity() {
         // used only if the tile file has no "bounds" metadata
         private val DEFAULT_BOUNDS = LatLngBounds.from(43.65, 46.8, 41.0, 40.0)
 
-        private data class ColorTheme(val id: String, val title: String, val about: String, val swatch: String)
+        private data class ColorTheme(val id: String, val title: String, val about: String, val swatch: String, val swatchNight: String)
 
         private val COLOR_THEMES = listOf(
-            ColorTheme("forest", "Тайга", "спокойный зелёный, как лес", "#2A7553"),
-            ColorTheme("ocean", "Лагуна", "прохладная сине-бирюзовая гамма", "#1F6A98"),
-            ColorTheme("sand", "Песок", "тёплая «бумажная» гамма для чтения", "#A84D29"),
-            ColorTheme("dusk", "Сумерки", "мягкий лавандовый для вечера", "#6450AE"),
-            ColorTheme("graphite", "Графит", "нейтральная серая, минимум отвлечения", "#A8531A")
+            ColorTheme("forest", "Тайга", "спокойный зелёный, как лес", "#2A7553", "#7FD1A8"),
+            ColorTheme("ocean", "Лагуна", "прохладная сине-бирюзовая гамма", "#1F6A98", "#7CC0EA"),
+            ColorTheme("sand", "Песок", "тёплая «бумажная» гамма для чтения", "#A84D29", "#E8996F"),
+            ColorTheme("dusk", "Сумерки", "мягкий лавандовый для вечера", "#6450AE", "#B5A6F0"),
+            ColorTheme("graphite", "Графит", "нейтральная серая, минимум отвлечения", "#A8531A", "#F0A868")
+        )
+
+        // quick filters on the map screen: emoji, short label, category key in POI_CATS (ordered by use on the road)
+        private val QUICK_CHIPS = listOf(
+            Triple("⛽", "АЗС", "АЗС"), Triple("🍽", "Еда", "Еда и кафе"), Triple("🅿", "Парковки", "Парковки"),
+            Triple("🏧", "Банкоматы", "Банки и банкоматы"), Triple("🛒", "Магазины", "Магазины"),
+            Triple("💊", "Аптеки", "Аптеки"), Triple("🏥", "Больницы", "Больницы и врачи"),
+            Triple("🛏", "Ночлег", "Ночлег"), Triple("🚻", "Туалеты", "Туалеты"), Triple("💧", "Вода", "Вода и родники")
         )
 
         private val POI_CATS: Map<String, List<String>> = linkedMapOf(

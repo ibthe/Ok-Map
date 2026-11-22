@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#26808080">
+  <item>
+    <selector>
+      <item android:state_selected="true">
+    <layer-list>
+      <item><shape android:shape="rectangle"><corners android:radius="@dimen/radius_pill" /><solid android:color="?attr/gAccentEdge" /></shape></item>
+      <item android:top="2dp"><shape android:shape="rectangle"><corners android:radius="@dimen/radius_pill" /><gradient android:angle="90" android:startColor="?attr/gAccentBottom" android:endColor="?attr/gAccentTop" /></shape></item>
+    </layer-list>
+      </item>
+      <item android:state_pressed="true">
+    <layer-list>
+      <item><shape android:shape="rectangle"><corners android:radius="@dimen/radius_pill" /><solid android:color="?attr/gRaisedEdge" /></shape></item>
+      <item android:top="2dp"><shape android:shape="rectangle"><corners android:radius="@dimen/radius_pill" /><gradient android:angle="90" android:startColor="?attr/gRaisedBottom" android:endColor="?attr/gRaisedTop" /><stroke android:width="1dp" android:color="?attr/gStroke" /></shape></item>
+    </layer-list>
+      </item>
+      <item>
+    <layer-list>
+      <item><shape android:shape="rectangle"><corners android:radius="@dimen/radius_pill" /><solid android:color="?attr/gRaisedEdge" /></shape></item>
+      <item android:bottom="2dp"><shape android:shape="rectangle"><corners android:radius="@dimen/radius_pill" /><gradient android:angle="270" android:startColor="?attr/gRaisedTop" android:endColor="?attr/gRaisedBottom" /><stroke android:width="1dp" android:color="?attr/gStroke" /></shape></item>
+    </layer-list>
+      </item>
+    </selector>
+  </item>
+</ripple>

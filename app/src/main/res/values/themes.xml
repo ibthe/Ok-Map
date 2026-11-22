@@ -50,7 +50,19 @@
         <item name="android:textAppearance">@style/TextAppearance.G.BodySmall</item>
     </style>
 
+    <style name="ShapeAppearanceOverlay.G.Sheet" parent="ShapeAppearanceOverlay.Material3.Corner.Top">
+        <item name="cornerSize">28dp</item>
+    </style>
+    <style name="Widget.G.BottomSheet" parent="Widget.Material3.BottomSheet">
+        <item name="backgroundTint">?attr/gDialog</item>
+        <item name="shapeAppearanceOverlay">@style/ShapeAppearanceOverlay.G.Sheet</item>
+    </style>
+    <style name="ThemeOverlay.G.BottomSheet" parent="ThemeOverlay.Material3.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/Widget.G.BottomSheet</item>
+    </style>
+
     <style name="Base.Theme.OkMap" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="bottomSheetDialogTheme">@style/ThemeOverlay.G.BottomSheet</item>
         <item name="textAppearanceHeadlineSmall">@style/TextAppearance.G.Title</item>
         <item name="textAppearanceBodyLarge">@style/TextAppearance.G.Body</item>
         <item name="textAppearanceBodyMedium">@style/TextAppearance.G.BodySmall</item>
@@ -74,6 +86,12 @@
         <item name="gOnAccent">#FFFFFF</item>
         <item name="gAccentContainer">#D6EBDD</item>
         <item name="gOnAccentContainer">#0E3A26</item>
+        <item name="gRaisedTop">#FAFDFEFC</item>
+        <item name="gRaisedBottom">#FAE8E9E5</item>
+        <item name="gRaisedEdge">#C2C4C0</item>
+        <item name="gAccentTop">#508E72</item>
+        <item name="gAccentBottom">#246547</item>
+        <item name="gAccentEdge">#1C4D37</item>
         <item name="gCrosshair">#C93A53</item>
         <item name="gCrosshairHalo">#CCF3F5F0</item>
         <item name="colorPrimary">#2A7553</item>
@@ -108,6 +126,12 @@
         <item name="gOnAccent">#FFFFFF</item>
         <item name="gAccentContainer">#D3E8F5</item>
         <item name="gOnAccentContainer">#0A3550</item>
+        <item name="gRaisedTop">#FAFDFEFE</item>
+        <item name="gRaisedBottom">#FAE7E9EB</item>
+        <item name="gRaisedEdge">#C1C4C5</item>
+        <item name="gAccentTop">#4785AB</item>
+        <item name="gAccentBottom">#1B5B83</item>
+        <item name="gAccentEdge">#144664</item>
         <item name="gCrosshair">#C93A53</item>
         <item name="gCrosshairHalo">#CCF1F5F8</item>
         <item name="colorPrimary">#1F6A98</item>
@@ -142,6 +166,12 @@
         <item name="gOnAccent">#FFFFFF</item>
         <item name="gAccentContainer">#F4DDD0</item>
         <item name="gOnAccentContainer">#4A1C0A</item>
+        <item name="gRaisedTop">#FAFEFDFA</item>
+        <item name="gRaisedBottom">#FAE9E7E1</item>
+        <item name="gRaisedEdge">#C4C1BD</item>
+        <item name="gAccentTop">#B86D50</item>
+        <item name="gAccentBottom">#904223</item>
+        <item name="gAccentEdge">#6F331B</item>
         <item name="gCrosshair">#C0392B</item>
         <item name="gCrosshairHalo">#CCF6F2EA</item>
         <item name="colorPrimary">#A84D29</item>
@@ -176,6 +206,12 @@
         <item name="gOnAccent">#FFFFFF</item>
         <item name="gAccentContainer">#E3DDF6</item>
         <item name="gOnAccentContainer">#261A5C</item>
+        <item name="gRaisedTop">#FAFDFDFE</item>
+        <item name="gRaisedBottom">#FAE8E8EB</item>
+        <item name="gRaisedEdge">#C3C2C5</item>
+        <item name="gAccentTop">#8070BD</item>
+        <item name="gAccentBottom">#564596</item>
+        <item name="gAccentEdge">#423573</item>
         <item name="gCrosshair">#C93A53</item>
         <item name="gCrosshairHalo">#CCF4F2F8</item>
         <item name="colorPrimary">#6450AE</item>
@@ -210,6 +246,12 @@
         <item name="gOnAccent">#FFFFFF</item>
         <item name="gAccentContainer">#F6E0CD</item>
         <item name="gOnAccentContainer">#4A2308</item>
+        <item name="gRaisedTop">#FAFDFDFD</item>
+        <item name="gRaisedBottom">#FAE8E8E7</item>
+        <item name="gRaisedEdge">#C2C2C1</item>
+        <item name="gAccentTop">#B87243</item>
+        <item name="gAccentBottom">#904716</item>
+        <item name="gAccentEdge">#6F3711</item>
         <item name="gCrosshair">#C0392B</item>
         <item name="gCrosshairHalo">#CCF2F2F1</item>
         <item name="colorPrimary">#A8531A</item>
