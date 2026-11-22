@@ -703,6 +703,7 @@ class MainActivity : AppCompatActivity() {
         }
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; minimumHeight = dp(320) }
         val titles = listOf("Карта", "Данные", "Вид", "Ещё")
+        val hasRelief = File(filesDir, "relief.mbtiles").exists()
 
         fun add(v: View, last: Boolean = false) { content.addView(v); if (!last) content.addView(divider()) }
         fun act(a: () -> Unit): () -> Unit = { sheet.dismiss(); a() }
