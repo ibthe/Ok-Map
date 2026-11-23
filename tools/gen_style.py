@@ -11,7 +11,7 @@ if "--theme" in sys.argv:
     THEME = sys.argv[sys.argv.index("--theme") + 1]
 if THEME not in themes.THEMES:
     sys.exit("unknown theme " + THEME)
-MAPT = themes.THEMES[THEME]["map"]
+MAPT = themes.THEMES[THEME].get("map_dark") if DARK and themes.THEMES[THEME].get("map_dark") else themes.THEMES[THEME]["map"]
 args = [a for a in sys.argv[1:] if not a.startswith("--") and a != THEME]
 SRC = "openmaptiles"
 FONT = ["NotoSans"]
@@ -257,7 +257,7 @@ layer("poi-dot", "circle", "poi", ["all", ["has", "name"], NOT_TR], minzoom=15,
 
 # transport: railway stations, metro, bus stations, stops, ferry terminals, airports
 STROKE = c("#ffffff", "#1c1f24")
-layer("tr-stop-dot", "circle", "poi", anyc("bus_stop", "tram_stop"), minzoom=16,
+layer("tr-stop-dot", "circle", "poi", anyc("bus_stop", "tram_stop"), minzoom=15,
       paint={"circle-radius": 2.6, "circle-color": c("#d9822b", "#e0a060"), "circle-stroke-width": 0.8,
              "circle-stroke-color": STROKE})
 layer("tr-bus-dot", "circle", "poi", anyc("bus_station"), minzoom=12,
@@ -321,7 +321,7 @@ label("lbl-busstation", "poi", ["all", ["has", "name"], anyc("bus_station")], 13
       c("#a8631a", "#e0a060"), anchor="top", offset=[0, 0.7], width=7)
 label("lbl-ferry", "poi", ["all", ["has", "name"], anyc("ferry_terminal", "harbor")], 12, 11,
       c("#1f7a70", "#4cc3b3"), anchor="top", offset=[0, 0.7], width=7)
-label("lbl-stop", "poi", ["all", ["has", "name"], anyc("bus_stop", "tram_stop")], 17, 10,
+label("lbl-stop", "poi", ["all", ["has", "name"], anyc("bus_stop", "tram_stop")], 16, 10,
       c("#a8631a", "#e0a060"), anchor="top", offset=[0, 0.6], width=7)
 label("lbl-hamlet", "place", cls("hamlet", "neighbourhood", "isolated_dwelling"), 13, zi((13, 10), (16, 13)),
       c("#666666", "#b5b5b5"), sort=RANK, width=7)

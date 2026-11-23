@@ -177,14 +177,14 @@ class Graph(file: File) {
         meters / (max(5, segKmh(k)) / 3.6) * penalty(k, avoidUnpaved)
 
     // ------------------------------------------------------------------ snapping
-    /** Closest road segment to the point, or null if there is no road within ~6 km. */
+    /** Closest road segment to the point. Searches the grid around it first, then the whole network (never null for a non-empty graph). */
     fun snap(lat: Double, lon: Double): Snap? {
         val cy = (Math.floor(lat * 1e6).toLong() - lat0) / cell
         val cx = (Math.floor(lon * 1e6).toLong() - lon0) / cell
         val k = cos(Math.toRadians(lat))
         val cellMeters = cell * 1e-6 * 111320.0 * k
         var best: Snap? = null
-        for (r in 0 until 14) {
+        for (r in 0 until 40) {
             for (y in (cy - r).toInt()..(cy + r).toInt()) {
                 for (x in (cx - r).toInt()..(cx + r).toInt()) {
                     if (max(abs(y - cy.toInt()), abs(x - cx.toInt())) != r) continue
@@ -201,6 +201,27 @@ class Graph(file: File) {
             }
             val b = best
             if (b != null && b.dist <= r * cellMeters) break
+        }
+        return best ?: nearestAnywhere(lat, lon)
+    }
+
+    /** No road in the neighbourhood: take the nearest junction of the whole network and snap to its closest segment. */
+    private fun nearestAnywhere(lat: Double, lon: Double): Snap? {
+        if (nodes == 0) return null
+        val k = cos(Math.toRadians(lat))
+        var bn = -1
+        var bd = Double.MAX_VALUE
+        for (i in 0 until nodes) {
+            val dy = nLat(i) - lat
+            val dx = (nLon(i) - lon) * k
+            val d = dx * dx + dy * dy
+            if (d < bd) { bd = d; bn = i }
+        }
+        if (bn < 0) return null
+        var best: Snap? = null
+        for (i in adjStart(bn) until adjStart(bn + 1)) {
+            val s = snapToSegment(adj(i), lat, lon, k)
+            if (best == null || s.dist < best.dist) best = s
         }
         return best
     }
@@ -235,7 +256,7 @@ class Graph(file: File) {
             pLat = qLat
             pLon = qLon
         }
-        return Snap(seg, bestOff, bestD, bLat, bLon)
+        return Snap(seg, bestOff, haversine(lat, lon, bLat, bLon), bLat, bLon)
     }
 
     // ------------------------------------------------------------------ routing (A*)

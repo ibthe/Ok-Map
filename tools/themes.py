@@ -40,9 +40,11 @@ THEMES = {
         "light": dict(surface="#F6F2EA", panel="#FBF8F2", dialog="#FDFBF6", text="#2A2118", text2="#65564A",
                       hint="#968777", icon="#3A2E22", accent="#A84D29", on_accent="#FFFFFF",
                       container="#F4DDD0", on_container="#4A1C0A", crosshair="#C0392B"),
-        "dark": dict(surface="#16120E", panel="#1D1812", dialog="#241E17", text="#EFE6DA", text2="#BBAA97",
-                     hint="#8C7D6C", icon="#E8DCCB", accent="#E8996F", on_accent="#3A1505",
-                     container="#6B3418", on_container="#F4DDD0", crosshair="#FF8070"),
+        "dark": dict(surface="#11141B", panel="#181C25", dialog="#1F242E", text="#EEE8DC", text2="#BDB5A5",
+                     hint="#8B8576", icon="#E8E0D0", accent="#E8B96A", on_accent="#2E1F00",
+                     container="#5B4518", on_container="#F5E3BD", crosshair="#FF8070"),
+        # night desert: the dark map is deep blue-grey with olive land and teal water, the sand colour stays in the UI accent
+        "map_dark": dict(nh=225, ns=.0, nsd=.22, gh=95, gs=.55, wh=200, ws=.9, os=1.0, ph=35),
         "map": dict(nh=34, ns=.34, nsd=.24, gh=72, gs=.8, wh=188, ws=.6, os=1.05, ph=15),
     },
     "dusk": {

@@ -3275,7 +3275,7 @@
      false
     ]
    ],
-   "minzoom": 16,
+   "minzoom": 15,
    "paint": {
     "circle-radius": 2.6,
     "circle-color": "#a9a39c",
@@ -4183,7 +4183,7 @@
      ]
     ]
    ],
-   "minzoom": 17,
+   "minzoom": 16,
    "layout": {
     "text-field": [
      "to-string",

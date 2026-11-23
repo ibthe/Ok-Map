@@ -212,6 +212,10 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.btnRec).setOnClickListener { toggleRecording() }
         buildChips()
         updateRecButton()
+        if (prefs.getBoolean("reopen_menu", false)) {     // a theme / brightness change recreated the screen: show the menu again
+            prefs.edit().putBoolean("reopen_menu", false).apply()
+            ui.postDelayed({ showMenu() }, 300)
+        }
         findViewById<View>(R.id.btnPoint).setOnClickListener {
             val c = map?.cameraPosition?.target
             if (c != null) addWaypointDialog(c)
@@ -325,6 +329,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupMap(m: MapLibreMap) {
         map = m
+        m.uiSettings.isLogoEnabled = false            // MapLibre logo and the "i" attribution button are hidden;
+        m.uiSettings.isAttributionEnabled = false     // the OpenStreetMap credit is in Menu -> Справка
         m.setMinZoomPreference(4.0)
         m.setMaxZoomPreference(18.0)
         m.moveCamera(
@@ -372,6 +378,7 @@ class MainActivity : AppCompatActivity() {
             addOverlays(s)
             applyLabels(s)
             applyPoiFilter(s)
+            applyTransport(s)
             applyRelief(s)
             refreshWaypoints()
             refreshTrack()
@@ -714,33 +721,39 @@ class MainActivity : AppCompatActivity() {
         layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
     }
 
-    /** One 56 dp row: title on the left, current value and a chevron on the right. */
-    private fun menuRow(title: String, value: String? = null, onClick: () -> Unit): View {
+    /** One row: title (+ optional grey hint) on the left, current value and a chevron on the right. */
+    private fun menuRow(title: String, value: String? = null, sub: String? = null, onClick: () -> Unit): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = dp(56)
-            setPadding(dp(4), 0, dp(4), 0)
+            setPadding(dp(4), dp(8), dp(4), dp(8))
             val tv = android.util.TypedValue()
             theme.resolveAttribute(android.R.attr.selectableItemBackground, tv, true)
             setBackgroundResource(tv.resourceId)
             setOnClickListener { onClick() }
         }
-        row.addView(label(title, 16f, R.attr.gTextPrimary), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(titleBlock(title, sub, true), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         if (value != null) row.addView(label(value, 14f, R.attr.gTextSecondary).apply { setPadding(dp(8), 0, dp(4), 0) })
         row.addView(label("›", 22f, R.attr.gHint).apply { setPadding(dp(8), 0, dp(4), 0) })
         return row
     }
 
-    private fun menuSwitch(title: String, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit): View {
+    private fun titleBlock(title: String, sub: String?, enabled: Boolean): View {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(label(title, 16f, if (enabled) R.attr.gTextPrimary else R.attr.gHint))
+        if (sub != null) col.addView(label(sub, 13f, R.attr.gTextSecondary).apply { setPadding(0, dp(2), 0, 0) })
+        return col
+    }
+
+    private fun menuSwitch(title: String, checked: Boolean, enabled: Boolean = true, sub: String? = null, onChange: (Boolean) -> Unit): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = dp(56)
-            setPadding(dp(4), 0, dp(4), 0)
+            setPadding(dp(4), dp(8), dp(4), dp(8))
         }
-        row.addView(label(title, 16f, if (enabled) R.attr.gTextPrimary else R.attr.gHint),
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(titleBlock(title, sub, enabled), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         val sw = com.google.android.material.materialswitch.MaterialSwitch(this).apply {
             isChecked = checked
             isEnabled = enabled
@@ -751,14 +764,35 @@ class MainActivity : AppCompatActivity() {
         return row
     }
 
+    private fun note(text: String) = label(text, 13f, R.attr.gHint).apply { setPadding(dp(4), dp(12), dp(4), dp(4)) }
+
+    /** Raised "key" button (same look as the on-map buttons). */
+    private fun keyButton(text: String, primary: Boolean, height: Int = 56, onClick: () -> Unit) = TextView(this).apply {
+        this.text = text
+        gravity = Gravity.CENTER
+        setTextAppearance(R.style.TextAppearance_G_Label)
+        textSize = 16f
+        setTextColor(themeColor(if (primary) R.attr.gOnAccent else R.attr.gTextPrimary))
+        background = ContextCompat.getDrawable(this@MainActivity, if (primary) R.drawable.bg_btn_primary else R.drawable.bg_fab_pill)
+        elevation = dp(3).toFloat()
+        isClickable = true
+        isFocusable = true
+        minimumHeight = dp(height)
+        setPadding(dp(12), 0, dp(12), dp(3))
+        stateListAnimator = android.animation.AnimatorInflater.loadStateListAnimator(this@MainActivity, R.animator.press)
+        setOnClickListener { onClick() }
+    }
+
+    // menu categories, named by what they are for
+    private val MENU_TABS = listOf("🗺" to "Карта", "🧭" to "Навигация", "📍" to "Мои места", "🎨" to "Оформление", "📖" to "Справка")
+
     private fun showMenu() {
         val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(8), dp(16), dp(24))
         }
-        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; minimumHeight = dp(320) }
-        val titles = listOf("Карта", "Данные", "Вид", "Ещё")
+        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; minimumHeight = dp(340) }
         val hasRelief = File(filesDir, "relief.mbtiles").exists()
 
         fun add(v: View, last: Boolean = false) { content.addView(v); if (!last) content.addView(divider()) }
@@ -768,128 +802,158 @@ class MainActivity : AppCompatActivity() {
             content.removeAllViews()
             prefs.edit().putInt("menu_tab", i).apply()
             when (i) {
-                0 -> {
+                0 -> {   // MAP: what is drawn
                     val langs = enabledLanguages().joinToString(" ") { it.name }
-                    add(menuRow("Языки названий", langs, act { showLanguageDialog() }))
-                    add(menuSwitch("Рельеф: тени гор", prefs.getBoolean("relief_on", true) && hasRelief, hasRelief) { on ->
+                    add(menuRow("Языки названий", langs, null, act { showLanguageDialog() }))
+                    add(menuSwitch("Рельеф", prefs.getBoolean("relief_on", true) && hasRelief, hasRelief,
+                        if (hasRelief) "Тени гор на карте" else "Нет данных рельефа") { on ->
                         prefs.edit().putBoolean("relief_on", on).apply(); style?.let { applyRelief(it) }
                     })
-                    add(menuRow("Компас", null, act { compass.openLast() }))
-                    add(menuRow("Кибла: направление на Мекку", null, act { compass.open(Compass.Kind.QIBLA) }))
-                    add(menuRow("Линейка", if (rulerPts.isEmpty()) null else Geo.fmtDist(Geo.length(rulerPts)), act {
-                        rulerOn = true; refreshRuler()
-                    }))
-                    add(menuRow("Маршрут к перекрестию", null, act {
+                    add(menuRow("Линейка", if (rulerPts.isEmpty()) null else Geo.fmtDist(Geo.length(rulerPts)),
+                        "Измерить расстояние по точкам на карте", act { rulerOn = true; refreshRuler() }))
+                    add(menuRow("Перейти к координатам", null, null, act { gotoCoordinatesDialog() }), true)
+                    content.addView(note("АЗС, еда, вокзалы, остановки и другие места включаются кнопками над картой."))
+                }
+                1 -> {   // NAVIGATION: routes, voice, compass
+                    add(menuRow("Маршрут к перекрестию", null, "От вашего местоположения до точки в центре экрана", act {
                         map?.cameraPosition?.target?.let { startRoute(it, "Точка на карте") }
                     }))
-                    add(menuSwitch("Голос в навигации", prefs.getBoolean("nav_voice", true)) { on ->
-                        prefs.edit().putBoolean("nav_voice", on).apply()
-                    })
-                    add(menuSwitch("Избегать грунтовых дорог", prefs.getBoolean("nav_avoid_unpaved", true)) { on ->
-                        prefs.edit().putBoolean("nav_avoid_unpaved", on).apply()
-                    })
-                    add(menuRow("Перейти к координатам", null, act { gotoCoordinatesDialog() }), true)
+                    add(menuSwitch("Голосовые подсказки", prefs.getBoolean("nav_voice", true), true,
+                        "Телефон проговаривает повороты") { on -> prefs.edit().putBoolean("nav_voice", on).apply() })
+                    add(menuSwitch("Объезжать грунтовки", prefs.getBoolean("nav_avoid_unpaved", true), true,
+                        "Ехать по асфальту, если есть выбор") { on -> prefs.edit().putBoolean("nav_avoid_unpaved", on).apply() })
+                    add(menuRow("Компас", null, "Север, кибла или выбранное место", act { compass.openLast() }))
+                    add(menuRow("Кибла", null, "Направление на Мекку для намаза", act { compass.open(Compass.Kind.QIBLA) }), true)
+                    content.addView(note("Чтобы проложить маршрут к месту: найдите его в поиске или нажмите на карту и выберите «Маршрут»."))
                 }
-                1 -> {
-                    add(menuRow("Мои точки", "${userDb.waypoints().size}", act { showWaypoints() }))
-                    add(menuRow("Мои треки", "${userDb.tracks().size}", act { showTracks() }))
-                    add(menuRow("Экспорт GPX", null, act {
+                2 -> {   // MY PLACES: points, tracks, files
+                    add(menuSwitch("Запись трека", TrackService.running, true,
+                        "Записывает ваш путь по GPS (даже при выключенном экране)") { on ->
+                        if (on != TrackService.running) toggleRecording()
+                        content.postDelayed({ if (content.isAttachedToWindow) page(2) }, 900)
+                    })
+                    add(menuRow("Мои точки", "${userDb.waypoints().size}", null, act { showWaypoints() }))
+                    add(menuRow("Мои треки", "${userDb.tracks().size}", "Записанные пути", act { showTracks() }))
+                    add(menuRow("Экспорт GPX", null, "Сохранить точки и треки в файл", act {
                         exportLauncher.launch("okmap-" + SimpleDateFormat("yyyyMMdd", Locale.US).format(Date()) + ".gpx")
                     }))
-                    add(menuRow("Импорт GPX", null, act { importLauncher.launch(arrayOf("*/*")) }), true)
+                    add(menuRow("Импорт GPX", null, "Загрузить точки и треки из файла", act { importLauncher.launch(arrayOf("*/*")) }), true)
                 }
-                2 -> appearancePage(content, sheet)
-                else -> {
-                    add(menuRow("Справка", null, act { showInfo() }))
-                    add(menuRow("Диагностика", null, act { showDiagnostics() }))
-                    add(menuSwitch("Подписи одним языком (если пропали названия)", prefs.getBoolean("labels_simple", false)) { on ->
+                3 -> appearancePage(content, sheet)
+                else -> {  // HELP
+                    add(menuRow("Справка", null, null, act { showInfo() }))
+                    add(menuRow("Диагностика", null, "Размер данных и слои карты", act { showDiagnostics() }))
+                    add(menuSwitch("Подписи одним языком", prefs.getBoolean("labels_simple", false), true,
+                        "Включайте, только если пропали названия на карте") { on ->
                         prefs.edit().putBoolean("labels_simple", on).apply(); style?.let { applyLabels(it) }
                     }, true)
+                    content.addView(note("Данные карты © участники OpenStreetMap (лицензия ODbL). Ok Map работает без интернета."))
                 }
             }
         }
 
-        val tabs = com.google.android.material.button.MaterialButtonToggleGroup(this).apply {
-            isSingleSelection = true
-            isSelectionRequired = true
+        // tab bar: emoji above a short label, the active tab is "pressed in"
+        val tabRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val tabs = ArrayList<View>()
+        fun selectTab(i: Int) { tabs.forEachIndexed { k, v -> v.isSelected = k == i }; page(i) }
+        MENU_TABS.forEachIndexed { i, (emoji, name) ->
+            val tab = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_chip)
+                stateListAnimator = android.animation.AnimatorInflater.loadStateListAnimator(this@MainActivity, R.animator.press)
+                isClickable = true
+                isFocusable = true
+                setPadding(dp(2), dp(4), dp(2), dp(7))
+                setOnClickListener { selectTab(i) }
+            }
+            tab.addView(TextView(this).apply { text = emoji; textSize = 20f; gravity = Gravity.CENTER; isDuplicateParentStateEnabled = true })
+            tab.addView(TextView(this).apply {
+                text = name; gravity = Gravity.CENTER; maxLines = 1
+                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                setTextColor(resources.getColorStateList(R.color.chip_text, theme))
+                isDuplicateParentStateEnabled = true
+                androidx.core.widget.TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
+                    this, 9, 12, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(16)))
+            tabs.add(tab)
+            tabRow.addView(tab, LinearLayout.LayoutParams(0, dp(64), 1f).apply { if (i < MENU_TABS.size - 1) marginEnd = dp(6) })
         }
-        val ids = titles.map { View.generateViewId() }
-        titles.forEachIndexed { i, t ->
-            tabs.addView(com.google.android.material.button.MaterialButton(this, null,
-                com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-                id = ids[i]; text = t; textSize = 14f; isAllCaps = false
-                layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f)
-            })
-        }
-        tabs.addOnButtonCheckedListener { _, id, checked -> if (checked) page(ids.indexOf(id)) }
-        root.addView(tabs, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        root.addView(tabRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             .apply { bottomMargin = dp(12) })
         root.addView(content)
         sheet.setContentView(root)
         sheet.behavior.skipCollapsed = true
         sheet.setOnShowListener { sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED }
-        tabs.check(ids[prefs.getInt("menu_tab", 0).coerceIn(0, 3)])
+        selectTab(prefs.getInt("menu_tab", 0).coerceIn(0, MENU_TABS.size - 1))
         sheet.show()
     }
 
-    /** Appearance in one compact block: brightness as a 3-way switch, colour theme as 5 round swatches. */
+    /** Appearance: brightness as a 3-way switch, colour themes as round swatches. Changing either keeps the menu open on this tab. */
     private fun appearancePage(content: LinearLayout, sheet: com.google.android.material.bottomsheet.BottomSheetDialog) {
         content.addView(label("Яркость", 14f, R.attr.gTextSecondary, true).apply { setPadding(dp(4), dp(8), 0, dp(8)) })
-        val modes = listOf("auto" to "Авто", "light" to "День", "dark" to "Ночь")
+        val modes = listOf("auto" to "Как в системе", "light" to "День", "dark" to "Ночь")
         val g = com.google.android.material.button.MaterialButtonToggleGroup(this).apply { isSingleSelection = true; isSelectionRequired = true }
         val mids = modes.map { View.generateViewId() }
         modes.forEachIndexed { i, m ->
             g.addView(com.google.android.material.button.MaterialButton(this, null,
                 com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-                id = mids[i]; text = m.second; textSize = 14f; isAllCaps = false
+                id = mids[i]; text = m.second; textSize = 13f; isAllCaps = false
                 layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f)
             })
         }
         g.check(mids[modes.indexOfFirst { it.first == themeMode() }.coerceAtLeast(0)])
         g.addOnButtonCheckedListener { _, id, checked ->
             val m = modes[mids.indexOf(id)].first
-            if (checked && m != themeMode()) { prefs.edit().putString("theme_mode", m).apply(); sheet.dismiss(); applyThemeMode(m) }
+            if (checked && m != themeMode()) {
+                prefs.edit().putString("theme_mode", m).putBoolean("reopen_menu", true).apply()
+                sheet.dismiss(); applyThemeMode(m)      // recreates the screen, the menu opens again on this tab
+            }
         }
         content.addView(g, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
         val cur = COLOR_THEMES.first { it.id == colorTheme() }
         content.addView(label("Цветовая тема: ${cur.title}", 14f, R.attr.gTextSecondary, true).apply { setPadding(dp(4), dp(24), 0, dp(12)) })
         for (group in COLOR_THEMES.chunked(4)) {
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; clipChildren = false }
-        row.setPadding(0, 0, 0, dp(12))
-        for (ct in group) {
-            val selected = ct.id == cur.id
-            val dot = View(this).apply {
-                background = android.graphics.drawable.GradientDrawable().apply {
-                    shape = android.graphics.drawable.GradientDrawable.OVAL
-                    setColor(Color.parseColor(if (isNight()) ct.swatchNight else ct.swatch))
-                    setStroke(dp(if (selected) 3 else 1), themeColor(if (selected) R.attr.gTextPrimary else R.attr.gStroke))
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; clipChildren = false }
+            row.setPadding(0, 0, 0, dp(12))
+            for (ct in group) {
+                val selected = ct.id == cur.id
+                val dot = View(this).apply {
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        shape = android.graphics.drawable.GradientDrawable.OVAL
+                        setColor(Color.parseColor(if (isNight()) ct.swatchNight else ct.swatch))
+                        setStroke(dp(if (selected) 3 else 1), themeColor(if (selected) R.attr.gTextPrimary else R.attr.gStroke))
+                    }
+                    elevation = dp(3).toFloat()
+                    contentDescription = ct.title
+                    stateListAnimator = android.animation.AnimatorInflater.loadStateListAnimator(this@MainActivity, R.animator.press)
+                    setOnClickListener {
+                        if (!selected) {
+                            prefs.edit().putString("color_theme", ct.id).putBoolean("reopen_menu", true).apply()
+                            sheet.dismiss(); recreate()   // the menu opens again on this tab, so the next theme is one tap away
+                        }
+                    }
                 }
-                elevation = dp(3).toFloat()
-                contentDescription = ct.title
-                stateListAnimator = android.animation.AnimatorInflater.loadStateListAnimator(this@MainActivity, R.animator.press)
-                setOnClickListener {
-                    if (!selected) { prefs.edit().putString("color_theme", ct.id).apply(); sheet.dismiss(); recreate() }
-                }
+                val cell = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; clipChildren = false }
+                cell.addView(dot, LinearLayout.LayoutParams(dp(48), dp(48)))
+                cell.addView(label(ct.title, 12f, if (selected) R.attr.gTextPrimary else R.attr.gTextSecondary, selected)
+                    .apply { setPadding(0, dp(8), 0, 0) })
+                row.addView(cell, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             }
-            val cell = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; clipChildren = false }
-            cell.addView(dot, LinearLayout.LayoutParams(dp(48), dp(48)))
-            cell.addView(label(ct.title, 12f, if (selected) R.attr.gTextPrimary else R.attr.gTextSecondary, selected)
-                .apply { setPadding(0, dp(8), 0, 0) })
-            row.addView(cell, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            content.addView(row)
         }
-        content.addView(row)
-        }
-        content.addView(label(cur.about.replaceFirstChar { it.uppercase() }, 14f, R.attr.gHint).apply { setPadding(dp(4), dp(16), 0, 0) })
+        content.addView(label(cur.about.replaceFirstChar { it.uppercase() }, 14f, R.attr.gHint).apply { setPadding(dp(4), dp(8), 0, 0) })
     }
 
-    // ------------------------------------------------------------------ quick POI filters on the map screen
+    // ------------------------------------------------------------------ quick filters on the map screen (places + transport)
     private fun buildChips() {
         val row = findViewById<LinearLayout>(R.id.chipRow)
         row.removeAllViews()
         val sel = prefs.getStringSet("poi_cats", emptySet()) ?: emptySet()
+        val tr = trOn()
         for ((emoji, short, key) in QUICK_CHIPS) {
-            val on = key in sel
+            val on = if (key.startsWith("tr:")) key in tr else key in sel
             val chip = TextView(this).apply {
                 text = "$emoji  $short"
                 textSize = 14f
@@ -903,14 +967,39 @@ class MainActivity : AppCompatActivity() {
                 elevation = dp(3).toFloat()
                 stateListAnimator = android.animation.AnimatorInflater.loadStateListAnimator(this@MainActivity, R.animator.press)
                 setOnClickListener {
-                    val cur = (prefs.getStringSet("poi_cats", emptySet()) ?: emptySet()).toMutableSet()
-                    if (!cur.add(key)) cur.remove(key)
-                    prefs.edit().putStringSet("poi_cats", HashSet(cur)).apply()
-                    style?.let { applyPoiFilter(it) }
+                    if (key.startsWith("tr:")) {
+                        val cur = trOn().toMutableSet()
+                        if (!cur.add(key)) cur.remove(key)
+                        prefs.edit().putStringSet("tr_on", HashSet(cur)).apply()
+                        style?.let { applyTransport(it) }
+                        if (key == "tr:stop" && key in cur && (map?.cameraPosition?.zoom ?: 20.0) < 14.0)
+                            toast("Остановки видны при приближении карты")
+                    } else {
+                        val cur = (prefs.getStringSet("poi_cats", emptySet()) ?: emptySet()).toMutableSet()
+                        if (!cur.add(key)) cur.remove(key)
+                        prefs.edit().putStringSet("poi_cats", HashSet(cur)).apply()
+                        style?.let { applyPoiFilter(it) }
+                    }
                     buildChips()
                 }
             }
             row.addView(chip, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(47)).apply { marginEnd = dp(8) })
+        }
+    }
+
+    private fun trOn(): Set<String> = prefs.getStringSet("tr_on", null) ?: setOf("tr:station", "tr:air")
+
+    /** Transport layers follow the chips: stations (+ bus stations, ferries), stops, airports. */
+    private fun applyTransport(s: Style) {
+        val groups = mapOf(
+            "tr:station" to listOf("tr-station-dot", "lbl-station", "tr-bus-dot", "lbl-busstation", "tr-ferry-dot", "lbl-ferry"),
+            "tr:stop" to listOf("tr-stop-dot", "lbl-stop"),
+            "tr:air" to listOf("tr-aerodrome-dot", "lbl-aerodrome")
+        )
+        val on = trOn()
+        for ((key, ids) in groups) {
+            val v = if (key in on) Property.VISIBLE else Property.NONE
+            for (id in ids) s.getLayer(id)?.setProperties(PropertyFactory.visibility(v))
         }
     }
 
@@ -963,35 +1052,41 @@ class MainActivity : AppCompatActivity() {
         }, 20_000)
     }
 
-    /** Bottom card for a place (search result or long press): route, save, coordinates. */
+    /** Bottom card for a place (search result or long press): where it is, how far, route / compass / save / copy. */
     private fun showPlaceSheet(ll: LatLng, title: String?) {
         val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(16), dp(24), dp(24))
+            setPadding(dp(20), dp(12), dp(20), dp(24))
         }
-        root.addView(label(title ?: "Точка на карте", 20f, R.attr.gTextPrimary, true))
-        root.addView(label(Geo.fmtCoord(ll.latitude, ll.longitude), 14f, R.attr.gTextSecondary).apply { setPadding(0, dp(4), 0, dp(16)) })
+        val name = title ?: "Точка на карте"
+        root.addView(label(name, 22f, R.attr.gTextPrimary, true))
+        root.addView(label(Geo.fmtCoord(ll.latitude, ll.longitude), 14f, R.attr.gTextSecondary)
+            .apply { setPadding(0, dp(4), 0, 0); typeface = android.graphics.Typeface.MONOSPACE })
+        val me = myLoc
+        if (me != null) {
+            val d = Graph.haversine(me.latitude, me.longitude, ll.latitude, ll.longitude)
+            val b = Compass.bearing(me.latitude, me.longitude, ll.latitude, ll.longitude)
+            root.addView(label("От вас: " + Geo.fmtDist(d) + " на " + Compass.dirName(b) + ", азимут ${b.roundToInt()}°", 14f, R.attr.gTextSecondary)
+                .apply { setPadding(0, dp(4), 0, 0) })
+        }
+        root.addView(keyButton("Построить маршрут", true) { sheet.dismiss(); startRoute(ll, name) },
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(56)).apply { topMargin = dp(20) })
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val go = com.google.android.material.button.MaterialButton(this).apply {
-            text = "Маршрут"; textSize = 16f; isAllCaps = false
-            setOnClickListener { sheet.dismiss(); startRoute(ll, title ?: "Точка на карте") }
+        val items = listOf(
+            "Компас" to { sheet.dismiss(); compass.open(Compass.Kind.PLACE, ll.latitude, ll.longitude, name) },
+            "Сохранить" to { sheet.dismiss(); addWaypointDialog(ll) },
+            "Копировать" to {
+                val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("coords", "%.6f, %.6f".format(Locale.US, ll.latitude, ll.longitude)))
+                toast("Координаты скопированы")
+            }
+        )
+        for ((i, item) in items.withIndex()) {
+            row.addView(keyButton(item.first, false, 48) { item.second() }.apply { textSize = 14f },
+                LinearLayout.LayoutParams(0, dp(48), 1f).apply { if (i < items.size - 1) marginEnd = dp(8) })
         }
-        val save = com.google.android.material.button.MaterialButton(this, null,
-            com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-            text = "Сохранить"; textSize = 16f; isAllCaps = false
-            setOnClickListener { sheet.dismiss(); addWaypointDialog(ll) }
-        }
-        val cmp = com.google.android.material.button.MaterialButton(this, null,
-            com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-            text = "Компас"; textSize = 14f; isAllCaps = false
-            setOnClickListener { sheet.dismiss(); compass.open(Compass.Kind.PLACE, ll.latitude, ll.longitude, title ?: "Точка на карте") }
-        }
-        go.textSize = 14f; save.textSize = 14f
-        row.addView(go, LinearLayout.LayoutParams(0, dp(56), 1f).apply { marginEnd = dp(8) })
-        row.addView(cmp, LinearLayout.LayoutParams(0, dp(56), 1f).apply { marginEnd = dp(8) })
-        row.addView(save, LinearLayout.LayoutParams(0, dp(56), 1f))
-        root.addView(row)
+        root.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
         sheet.setContentView(root)
         sheet.window?.setDimAmount(0.15f)
         sheet.show()
@@ -1344,6 +1439,7 @@ class MainActivity : AppCompatActivity() {
         // quick filters on the map screen: emoji, short label, category key in POI_CATS (ordered by use on the road)
         private val QUICK_CHIPS = listOf(
             Triple("⛽", "АЗС", "АЗС"), Triple("🍽", "Еда", "Еда и кафе"), Triple("🅿", "Парковки", "Парковки"),
+            Triple("🚉", "Вокзалы", "tr:station"), Triple("🚏", "Остановки", "tr:stop"), Triple("✈", "Аэропорты", "tr:air"),
             Triple("🏧", "Банкоматы", "Банки и банкоматы"), Triple("🛒", "Магазины", "Магазины"),
             Triple("💊", "Аптеки", "Аптеки"), Triple("🏥", "Больницы", "Больницы и врачи"),
             Triple("🏛", "Места", "Достопримечательности"), Triple("🛏", "Ночлег", "Ночлег"), Triple("🚻", "Туалеты", "Туалеты"), Triple("💧", "Вода", "Вода и родники")

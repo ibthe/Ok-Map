@@ -11,6 +11,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
@@ -53,6 +54,10 @@ class Navigator(
     private var destLat = 0.0
     private var destLon = 0.0
     private var destTitle = ""
+    private var fromLat = 0.0
+    private var fromLon = 0.0
+    private var connStart = 0.0      // metres from the start point to the road
+    private var connEnd = 0.0        // metres from the road to the destination
     private var progressIdx = 0
     private var along = 0.0
     private var stepIdx = 1
@@ -87,6 +92,7 @@ class Navigator(
     // ------------------------------------------------------------------ map layers
     fun addLayers(s: Style) {
         val night = isNight()
+        addConnectorLayers(s)
         s.addSource(GeoJsonSource("ovl-route"))
         s.addLayer(LineLayer("ovl-route-casing", "ovl-route").withProperties(
             PropertyFactory.lineColor(if (night) "#0B1220" else "#FFFFFF"), PropertyFactory.lineWidth(10f),
@@ -94,6 +100,16 @@ class Navigator(
         s.addLayer(LineLayer("ovl-route-l", "ovl-route").withProperties(
             PropertyFactory.lineColor(if (night) "#5AB0FF" else "#1769E0"), PropertyFactory.lineWidth(6f),
             PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)))
+    }
+
+    private fun addConnectorLayers(s: Style) {
+        val night = isNight()
+        for (id in listOf("ovl-route-c1", "ovl-route-c2")) {
+            s.addSource(GeoJsonSource(id))
+            s.addLayer(LineLayer("$id-l", id).withProperties(
+                PropertyFactory.lineColor(if (night) "#5AB0FF" else "#1769E0"), PropertyFactory.lineWidth(4f),
+                PropertyFactory.lineDasharray(arrayOf(1.2f, 1.6f)), PropertyFactory.lineCap(Property.LINE_CAP_ROUND)))
+        }
     }
 
     /** Called after the style was (re)loaded, e.g. on a theme change while a route is shown. */
@@ -107,6 +123,12 @@ class Navigator(
         for (i in r.lat.indices) pts.add(LatLng(r.lat[i], r.lon[i]))
         style()?.getSourceAs<GeoJsonSource>("ovl-route")?.setGeoJson(Geo.lineFc(pts))
         style()?.getSourceAs<GeoJsonSource>("ovl-search")?.setGeoJson(Geo.pointFc(listOf(LatLng(destLat, destLon))))
+        val last = r.lat.size - 1
+        // dashed "off-road" connectors: start point -> road, road -> destination
+        style()?.getSourceAs<GeoJsonSource>("ovl-route-c1")?.setGeoJson(Geo.lineFc(
+            if (connStart > 15) listOf(LatLng(fromLat, fromLon), LatLng(r.lat[0], r.lon[0])) else emptyList()))
+        style()?.getSourceAs<GeoJsonSource>("ovl-route-c2")?.setGeoJson(Geo.lineFc(
+            if (connEnd > 15) listOf(LatLng(r.lat[last], r.lon[last]), LatLng(destLat, destLon)) else emptyList()))
     }
 
     // ------------------------------------------------------------------ planning
@@ -122,16 +144,19 @@ class Navigator(
         thread(name = "route") {
             var result: Route? = null
             var error: String? = null
+            var sd = 0.0
+            var ed = 0.0
             try {
                 val g = graph ?: Graph(f).also { graph = it }
                 val avoid = prefs.getBoolean("nav_avoid_unpaved", true)
+                // both points are moved to the nearest road, however far it is
                 val s = g.snap(fromLat, fromLon)
                 val e = g.snap(lat, lon)
-                if (s == null || e == null) error = "Рядом с точкой нет дорог"
-                else if (s.dist > 3000 || e.dist > 3000) error = "Точка слишком далеко от дорог"
+                if (s == null || e == null) error = "В данных нет дорог"
                 else {
+                    sd = s.dist; ed = e.dist
                     val legs = g.route(s, e, avoid)
-                    if (legs == null) error = "Маршрут не найден: дороги не связаны"
+                    if (legs == null) error = "Маршрут не найден: дороги в этих местах не связаны"
                     else result = g.buildRoute(legs)
                 }
             } catch (ex: Exception) {
@@ -142,11 +167,39 @@ class Navigator(
             act.runOnUiThread {
                 busy = false
                 if (silent && !navigating) return@runOnUiThread        // navigation was ended while rerouting
-                if (error != null || result == null) { toast(error ?: "Маршрут не найден"); return@runOnUiThread }
-                destLat = lat; destLon = lon; destTitle = title
-                applyRoute(result, silent)
+                val r = result
+                if (error != null || r == null) { toast(error ?: "Маршрут не найден"); return@runOnUiThread }
+                val accept = {
+                    destLat = lat; destLon = lon; destTitle = title
+                    this.fromLat = fromLat; this.fromLon = fromLon
+                    connStart = sd; connEnd = ed
+                    applyRoute(r, silent)
+                }
+                when {
+                    silent -> accept()
+                    sd > 200_000.0 -> farFromMap(sd, lat, lon, title)
+                    maxOf(sd, ed) > 30_000.0 -> MaterialAlertDialogBuilder(act)
+                        .setTitle("Дорога далеко")
+                        .setMessage(("Ближайшая дорога: ${if (sd > 30_000.0) "к месту старта" else "к точке назначения"} " +
+                            "в ${Geo.fmtDist(maxOf(sd, ed))}. Построить маршрут до неё и дальше по прямой?"))
+                        .setPositiveButton("Построить") { _, _ -> accept() }
+                        .setNegativeButton("Отмена", null).show()
+                    else -> accept()
+                }
             }
         }
+    }
+
+    /** The user is far outside the map (e.g. testing at home): offer the crosshair as an explicit start. */
+    private fun farFromMap(dist: Double, lat: Double, lon: Double, title: String) {
+        val c = map()?.cameraPosition?.target
+        val b = MaterialAlertDialogBuilder(act)
+            .setTitle("Вы за пределами карты")
+            .setMessage("Ваше местоположение в ${Geo.fmtDist(dist)} от ближайшей дороги этой карты. " +
+                "Можно построить маршрут от перекрестия (центра экрана).")
+            .setNegativeButton("Отмена", null)
+        if (c != null) b.setPositiveButton("От перекрестия") { _, _ -> planTo(lat, lon, title, c.latitude, c.longitude) }
+        b.show()
     }
 
     private fun applyRoute(r: Route, rerouted: Boolean) {
@@ -196,6 +249,8 @@ class Navigator(
         tts?.stop(); tts?.shutdown(); tts = null; ttsReady = false
         style()?.getSourceAs<GeoJsonSource>("ovl-route")?.setGeoJson(Geo.lineFc(emptyList()))
         style()?.getSourceAs<GeoJsonSource>("ovl-search")?.setGeoJson(Geo.pointFc(emptyList()))
+        style()?.getSourceAs<GeoJsonSource>("ovl-route-c1")?.setGeoJson(Geo.lineFc(emptyList()))
+        style()?.getSourceAs<GeoJsonSource>("ovl-route-c2")?.setGeoJson(Geo.lineFc(emptyList()))
         navTop.visibility = View.GONE
         navBottom.visibility = View.GONE
         map()?.let { m ->
@@ -288,14 +343,21 @@ class Navigator(
         btnCancel.text = if (preview) "Отмена" else "Завершить"
         val r = route ?: return
         updateStats(r.distance - along, r.seconds * max(0.0, r.distance - along) / max(1.0, r.distance))
-        if (preview) navSub.text = destTitle
+        if (preview) navSub.text = previewSub()
+    }
+
+    private fun previewSub(): String {
+        val note = StringBuilder(destTitle)
+        if (connStart > 50) note.append("  ·  от вас до дороги ").append(Geo.fmtDist(connStart))
+        if (connEnd > 50) note.append("  ·  от дороги до точки ").append(Geo.fmtDist(connEnd))
+        return note.toString()
     }
 
     private fun updateStats(rest: Double, seconds: Double) {
         val eta = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(System.currentTimeMillis() + (seconds * 1000).toLong()))
         navStat.text = fmtDuration(seconds) + "  ·  " + Geo.fmtDist(rest)
         if (navigating) navSub.text = "Прибытие в $eta"
-        else navSub.text = destTitle + "  ·  прибытие в $eta"
+        else navSub.text = previewSub() + "  ·  прибытие в $eta"
     }
 
     private fun updateGuidance(l: Location?) {

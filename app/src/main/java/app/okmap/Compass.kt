@@ -27,6 +27,7 @@ import org.maplibre.android.style.sources.GeoJsonSource
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
@@ -64,14 +65,15 @@ class Compass(
     private var haveAcc = false
     private var haveMag = false
     private val rm = FloatArray(9)
-    private val rm2 = FloatArray(9)
-    private val ori = FloatArray(3)
 
     private var heading = 0f                 // smoothed, degrees from true (or magnetic) north
     private var first = true
     private var declination = 0f
     private var accuracy = SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM
     private var wasAligned = false
+    private var jump = 0
+    private var disturbed = false
+    private var disturbCount = 0
     private var lastMapRotate = 0L
     private var posLat = Double.NaN
     private var posLon = Double.NaN
@@ -88,6 +90,7 @@ class Compass(
     private val chipQibla: TextView = act.findViewById(R.id.chipQibla)
     private val chipPlace: TextView = act.findViewById(R.id.chipPlace)
     private val btnMap: TextView = act.findViewById(R.id.btnCompassMap)
+    private val cal: TextView = act.findViewById(R.id.cCal)
 
     init {
         act.findViewById<View>(R.id.btnCompassClose).setOnClickListener { close() }
@@ -96,6 +99,18 @@ class Compass(
         chipPlace.setOnClickListener {
             if (placeLat.isNaN()) Toast.makeText(act, "Найдите место в поиске или нажмите на карту и выберите «Компас»", Toast.LENGTH_LONG).show()
             else select(Kind.PLACE)
+        }
+        cal.setOnClickListener {
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(act)
+                .setTitle("Калибровка компаса")
+                .setMessage("Компас работает по магнитному полю Земли, поэтому его сбивают металл, магниты, автомобильные " +
+                    "держатели, чехлы с магнитом, провода и корпус машины.\n\n" +
+                    "1. Отойдите от металла и электроники.\n" +
+                    "2. Плавно нарисуйте телефоном в воздухе цифру 8, поворачивая кисть в разные стороны, 5–10 раз.\n" +
+                    "3. Медленно поверните телефон вокруг каждой из осей.\n\n" +
+                    "Если точность осталась низкой, повторите вдали от машин и зданий. Держите телефон ровно или вертикально, " +
+                    "не под углом около 45°.")
+                .setPositiveButton("Понятно", null).show()
         }
         btnMap.setOnClickListener {
             prefs.edit().putBoolean("compass_map", !prefs.getBoolean("compass_map", false)).apply()
@@ -154,10 +169,12 @@ class Compass(
     // ------------------------------------------------------------------ sensors
     private fun register() {
         if (registered) return
-        if (rotSensor != null) sm.registerListener(this, rotSensor, SensorManager.SENSOR_DELAY_UI)
-        else {
-            sm.registerListener(this, accSensor, SensorManager.SENSOR_DELAY_UI)
-            sm.registerListener(this, magSensor, SensorManager.SENSOR_DELAY_UI)
+        if (rotSensor != null) {
+            sm.registerListener(this, rotSensor, SensorManager.SENSOR_DELAY_GAME)
+            if (magSensor != null) sm.registerListener(this, magSensor, SensorManager.SENSOR_DELAY_UI)   // only for the interference check
+        } else {
+            sm.registerListener(this, accSensor, SensorManager.SENSOR_DELAY_GAME)
+            sm.registerListener(this, magSensor, SensorManager.SENSOR_DELAY_GAME)
         }
         registered = true
     }
@@ -175,49 +192,66 @@ class Compass(
 
     @Suppress("DEPRECATION")
     override fun onSensorChanged(e: SensorEvent) {
+        if (e.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) checkInterference(e.values)
         val ok: Boolean
         when (e.sensor.type) {
             Sensor.TYPE_ROTATION_VECTOR -> { SensorManager.getRotationMatrixFromVector(rm, e.values); ok = true }
             Sensor.TYPE_ACCELEROMETER -> {
-                for (i in 0..2) gravity[i] = if (haveAcc) gravity[i] + 0.2f * (e.values[i] - gravity[i]) else e.values[i]
+                for (i in 0..2) gravity[i] = if (haveAcc) gravity[i] + 0.15f * (e.values[i] - gravity[i]) else e.values[i]
                 haveAcc = true
-                ok = haveMag && SensorManager.getRotationMatrix(rm, null, gravity, geomag)
+                ok = false
             }
             Sensor.TYPE_MAGNETIC_FIELD -> {
-                for (i in 0..2) geomag[i] = if (haveMag) geomag[i] + 0.2f * (e.values[i] - geomag[i]) else e.values[i]
+                for (i in 0..2) geomag[i] = if (haveMag) geomag[i] + 0.15f * (e.values[i] - geomag[i]) else e.values[i]
                 haveMag = true
-                ok = haveAcc && SensorManager.getRotationMatrix(rm, null, gravity, geomag)
+                ok = rotSensor == null && haveAcc && SensorManager.getRotationMatrix(rm, null, gravity, geomag)
             }
             else -> return
         }
         if (!ok) return
-        // flat on the hand: the top edge of the phone is the pointer; held upright: the back camera direction is
-        SensorManager.getOrientation(rm, ori)
-        val pitch = abs(Math.toDegrees(ori[1].toDouble()))
-        val azimuth: Double
-        if (pitch > 50.0) {
-            SensorManager.remapCoordinateSystem(rm, SensorManager.AXIS_X, SensorManager.AXIS_MINUS_Z, rm2)
-            SensorManager.getOrientation(rm2, ori)
-            azimuth = Math.toDegrees(ori[0].toDouble())
-        } else {
-            val rot = act.windowManager.defaultDisplay.rotation
-            when (rot) {
-                1 -> SensorManager.remapCoordinateSystem(rm, SensorManager.AXIS_Y, SensorManager.AXIS_MINUS_X, rm2)
-                2 -> SensorManager.remapCoordinateSystem(rm, SensorManager.AXIS_MINUS_X, SensorManager.AXIS_MINUS_Y, rm2)
-                3 -> SensorManager.remapCoordinateSystem(rm, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_X, rm2)
-                else -> System.arraycopy(rm, 0, rm2, 0, 9)
-            }
-            SensorManager.getOrientation(rm2, ori)
-            azimuth = Math.toDegrees(ori[0].toDouble())
+
+        // Pointing direction in the world frame (east, north). R maps device axes to world axes (R[row*3+col]).
+        // Phone flat in the hand: the top edge (or the long edge in landscape) points the way.
+        // Phone upright: the back camera looks the way. The two are blended smoothly by tilt, so there is no jump
+        // between "flat" and "upright" formulas (that jump made the heading wander at ~45 degrees of tilt).
+        val flatE: Double
+        val flatN: Double
+        when (act.windowManager.defaultDisplay.rotation) {
+            1 -> { flatE = -rm[0].toDouble(); flatN = -rm[3].toDouble() }
+            2 -> { flatE = -rm[1].toDouble(); flatN = -rm[4].toDouble() }
+            3 -> { flatE = rm[0].toDouble(); flatN = rm[3].toDouble() }
+            else -> { flatE = rm[1].toDouble(); flatN = rm[4].toDouble() }
         }
-        val h = (azimuth + declination + 720.0) % 360.0
-        if (first) { heading = h.toFloat(); first = false }
+        val upE = -rm[2].toDouble()
+        val upN = -rm[5].toDouble()
+        val w = ((abs(rm[7].toDouble()) - 0.35) / 0.40).coerceIn(0.0, 1.0)
+        val ve = (1 - w) * flatE + w * upE
+        val vn = (1 - w) * flatN + w * upN
+        if (Math.hypot(ve, vn) < 0.08) return                 // pointing straight up / down: no usable direction
+        val h = (Math.toDegrees(atan2(ve, vn)) + declination + 720.0) % 360.0
+
+        if (first) { heading = h.toFloat(); first = false; jump = 0 }
         else {
             val d = ((h - heading + 540.0) % 360.0 - 180.0).toFloat()
-            heading = (heading + 0.18f * d + 360f) % 360f
+            val ad = abs(d)
+            // a single sample far from the current heading is usually a magnetic spike: wait for a few more
+            if (ad > 60f && jump < 4) { jump++; return }
+            jump = 0
+            if (ad < 0.6f) return                              // dead band: the dial stays still when the phone does
+            val a = when { ad > 30f -> 0.5f; ad > 8f -> 0.25f; else -> 0.08f }
+            heading = (heading + a * d + 360f) % 360f
         }
         refreshUi()
         rotateMapIfNeeded()
+    }
+
+    /** Earth's field is ~25-65 uT; far outside that range something nearby disturbs the sensor. */
+    private fun checkInterference(v: FloatArray) {
+        val b = Math.sqrt((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).toDouble())
+        val bad = b < 18.0 || b > 75.0
+        disturbCount = if (bad) disturbCount + 1 else max(0, disturbCount - 2)
+        val now = disturbCount >= 10
+        if (now != disturbed) { disturbed = now; refreshUi() }
     }
 
     // ------------------------------------------------------------------ position / maths
@@ -297,11 +331,19 @@ class Compass(
         }
         val needCal = accuracy <= SensorManager.SENSOR_STATUS_ACCURACY_LOW
         warn.text = when {
-            needCal -> "Компас неточен: покрутите телефон «восьмёркой»; отойдите от металла и магнитов"
+            disturbed -> "Магнитная помеха рядом (металл, магнит, провода, держатель): отойдите — показания неточны"
+            needCal -> "Компас неточен: покрутите телефон «восьмёркой»"
             approx && kind != Kind.NORTH -> "GPS не найден: направление считается от центра карты"
             else -> ""
         }
         warn.visibility = if (warn.text.isEmpty()) View.GONE else View.VISIBLE
+        val q = when {
+            disturbed -> "помеха"
+            accuracy >= SensorManager.SENSOR_STATUS_ACCURACY_HIGH -> "высокая"
+            accuracy == SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM -> "средняя"
+            else -> "низкая"
+        }
+        cal.text = "Точность компаса: $q  ·  как откалибровать"
     }
 
     private fun buzz() {
