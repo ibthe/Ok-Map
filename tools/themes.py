@@ -8,8 +8,9 @@ Design rules (long sessions outdoors / in the car):
   * the night variants keep the same hue family, lower luminance and avoid blue-heavy light (warmer neutrals).
 """
 import colorsys
+import sys
 
-ORDER = ["forest", "ocean", "sand", "dusk", "graphite"]
+ORDER = ["forest", "ocean", "sand", "dusk", "graphite", "sunset", "mint", "contrast"]
 
 # ui colours: surface (screen), panel (floating glass, drawn with alpha), dialog, text, text2, hint, icon,
 #             accent, on_accent, container, on_container, crosshair
@@ -42,7 +43,7 @@ THEMES = {
         "dark": dict(surface="#16120E", panel="#1D1812", dialog="#241E17", text="#EFE6DA", text2="#BBAA97",
                      hint="#8C7D6C", icon="#E8DCCB", accent="#E8996F", on_accent="#3A1505",
                      container="#6B3418", on_container="#F4DDD0", crosshair="#FF8070"),
-        "map": dict(nh=38, ns=.26, nsd=.20, gh=82, gs=.75, wh=195, ws=.7, os=1.0, ph=15),
+        "map": dict(nh=34, ns=.34, nsd=.24, gh=72, gs=.8, wh=188, ws=.6, os=1.05, ph=15),
     },
     "dusk": {
         "title": "Сумерки", "about": "мягкий лавандовый: расслабляет, хорош для вечера",
@@ -55,14 +56,44 @@ THEMES = {
         "map": dict(nh=262, ns=.12, nsd=.20, gh=145, gs=.65, wh=222, ws=.85, os=.85, ph=270),
     },
     "graphite": {
-        "title": "Графит", "about": "нейтральная серая гамма с тёплым акцентом: минимум отвлечения",
-        "light": dict(surface="#F2F2F1", panel="#F9F9F8", dialog="#FCFCFB", text="#1D1F21", text2="#53575C",
-                      hint="#82878C", icon="#2A2D30", accent="#A8531A", on_accent="#FFFFFF",
-                      container="#F6E0CD", on_container="#4A2308", crosshair="#C0392B"),
-        "dark": dict(surface="#111213", panel="#181A1C", dialog="#1F2123", text="#E8E9EA", text2="#A9ADB2",
-                     hint="#7A7F85", icon="#E0E2E4", accent="#F0A868", on_accent="#3A1C04",
-                     container="#6A3A12", on_container="#F6E0CD", crosshair="#FF8070"),
-        "map": dict(nh=210, ns=.03, nsd=.04, gh=120, gs=.3, wh=210, ws=.35, os=.3, ph=220),
+        "title": "Графит", "about": "строгая чёрно-белая гамма без цвета: максимум фокуса",
+        "light": dict(surface="#F1F1F1", panel="#FAFAFA", dialog="#FCFCFC", text="#17181A", text2="#505358",
+                      hint="#84878C", icon="#222427", accent="#25272B", on_accent="#FFFFFF",
+                      container="#E3E4E6", on_container="#1B1C1F", crosshair="#C0392B"),
+        "dark": dict(surface="#101112", panel="#17181A", dialog="#1E1F21", text="#ECEDEE", text2="#A8ABAF",
+                     hint="#7B7E83", icon="#E2E3E5", accent="#E4E6E9", on_accent="#141517",
+                     container="#34363A", on_container="#E3E4E6", crosshair="#FF8070"),
+        "map": dict(nh=220, ns=.015, nsd=.02, gh=120, gs=.10, wh=215, ws=.14, os=.10, ph=220, k=1.08),
+    },
+    "sunset": {
+        "title": "Закат", "about": "нежный розово-коралловый, тёплый и мягкий",
+        "light": dict(surface="#F8F1F2", panel="#FDF8F9", dialog="#FEFAFA", text="#2C1A1F", text2="#664A52",
+                      hint="#957C84", icon="#3A2229", accent="#B23A5E", on_accent="#FFFFFF",
+                      container="#F6DCE3", on_container="#4E0E24", crosshair="#0F6FB0"),
+        "dark": dict(surface="#171012", panel="#1F1619", dialog="#271C20", text="#F1E4E7", text2="#BFA6AD",
+                     hint="#8F767E", icon="#EBD9DE", accent="#F29BB5", on_accent="#45091F",
+                     container="#6E2540", on_container="#F6DCE3", crosshair="#6FC3FF"),
+        "map": dict(nh=345, ns=.12, nsd=.14, gh=100, gs=.6, wh=215, ws=.75, os=.9, ph=330),
+    },
+    "mint": {
+        "title": "Мята", "about": "свежая бирюзово-мятная, бодрая и чистая",
+        "light": dict(surface="#EFF6F5", panel="#F7FBFA", dialog="#FAFDFC", text="#112624", text2="#3E5855",
+                      hint="#728C89", icon="#1B3330", accent="#0A7C7F", on_accent="#FFFFFF",
+                      container="#CDEDEA", on_container="#053B3D", crosshair="#C93A53"),
+        "dark": dict(surface="#0B1514", panel="#111D1C", dialog="#172625", text="#DDF0EE", text2="#9DB8B5",
+                     hint="#6F8D8A", icon="#D0E8E5", accent="#6FD6D2", on_accent="#032B2C",
+                     container="#17504F", on_container="#CDEDEA", crosshair="#FF7088"),
+        "map": dict(nh=172, ns=.12, nsd=.18, gh=152, gs=.95, wh=188, ws=1.1, os=.8, ph=200),
+    },
+    "contrast": {
+        "title": "Контраст", "about": "максимальная читаемость на ярком солнце",
+        "light": dict(surface="#FAFAFA", panel="#FFFFFF", dialog="#FFFFFF", text="#000000", text2="#2E2E2E",
+                      hint="#595959", icon="#000000", accent="#0B3FBF", on_accent="#FFFFFF",
+                      container="#DCE6FF", on_container="#00123D", crosshair="#D00020"),
+        "dark": dict(surface="#000000", panel="#0C0C0C", dialog="#141414", text="#FFFFFF", text2="#D6D6D6",
+                     hint="#A0A0A0", icon="#FFFFFF", accent="#FFD400", on_accent="#000000",
+                     container="#3A3200", on_container="#FFE766", crosshair="#FF5C7A"),
+        "map": dict(nh=215, ns=.04, nsd=.05, gh=125, gs=1.15, wh=210, ws=1.2, os=1.15, ph=270, k=1.15),
     },
 }
 
@@ -132,6 +163,9 @@ def map_color(color, m, dark):
         h2, s2 = m["ph"] + (hd - 275) * .3, min(1, s * m["os"])
     else:                                                    # browns, oranges, reds (relief, rock, warnings)
         h2, s2 = hd, min(1, s * m["os"])
+    k = m.get("k", 1.0)                                     # optional contrast stretch around mid-grey
+    if k != 1.0:
+        l = max(0.0, min(1.0, .5 + (l - .5) * k))
     r2, g2, b2 = colorsys.hls_to_rgb((h2 % 360) / 360, l, max(0, min(1, s2)))
     R, G, B = (int(round(v * 255)) for v in (r2, g2, b2))
     if a is None:
@@ -140,5 +174,8 @@ def map_color(color, m, dark):
 
 
 if __name__ == "__main__":
+    if "--list" in sys.argv:
+        print(" ".join(ORDER))
+        sys.exit(0)
     problems = check()
     print("\n".join(problems) or "contrast OK")

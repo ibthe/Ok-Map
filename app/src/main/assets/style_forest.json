@@ -1,6 +1,6 @@
 {
  "version": 8,
- "name": "Georgia Offline forest",
+ "name": "Ok Map forest",
  "sources": {
   "openmaptiles": {
    "type": "vector",

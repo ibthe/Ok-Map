@@ -1,6 +1,6 @@
 {
  "version": 8,
- "name": "Georgia Offline ocean Dark",
+ "name": "Ok Map ocean Dark",
  "sources": {
   "openmaptiles": {
    "type": "vector",

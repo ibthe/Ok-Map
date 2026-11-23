@@ -1,6 +1,6 @@
 {
  "version": 8,
- "name": "Georgia Offline dusk",
+ "name": "Ok Map dusk",
  "sources": {
   "openmaptiles": {
    "type": "vector",

@@ -91,6 +91,7 @@ class MainActivity : AppCompatActivity() {
 
     private var myLoc: Location? = null
     private lateinit var nav: Navigator
+    private lateinit var compass: Compass
     private var following = false
     private var locActive = false
     private var pendingAfterPerm: (() -> Unit)? = null
@@ -167,6 +168,9 @@ class MainActivity : AppCompatActivity() {
         "sand" -> R.style.Theme_OkMap_Sand
         "dusk" -> R.style.Theme_OkMap_Dusk
         "graphite" -> R.style.Theme_OkMap_Graphite
+        "sunset" -> R.style.Theme_OkMap_Sunset
+        "mint" -> R.style.Theme_OkMap_Mint
+        "contrast" -> R.style.Theme_OkMap_Contrast
         else -> R.style.Theme_OkMap_Forest
     }
 
@@ -197,7 +201,13 @@ class MainActivity : AppCompatActivity() {
 
         nav = Navigator(this, { File(filesDir, "graph.bin").takeIf { it.exists() } }, { map }, { style }, prefs,
             { isNight() }, { onNavModeChanged() })
+        compass = Compass(this, { map }, { style }, prefs, { myLoc }, { withLocationPermission { startLocation(false) } },
+            { isNight() }, { onNavModeChanged() })
+        findViewById<View>(R.id.btnCompass).setOnClickListener { if (compass.isOpen) compass.close() else compass.openLast() }
         onBackPressedDispatcher.addCallback(this, backToStopNav)
+        findViewById<View>(R.id.btnRulerUndo).setOnClickListener { if (rulerPts.isNotEmpty()) rulerPts.removeAt(rulerPts.size - 1); refreshRuler() }
+        findViewById<View>(R.id.btnRulerMode).setOnClickListener { rulerOn = !rulerOn; refreshRuler() }
+        findViewById<View>(R.id.btnRulerDelete).setOnClickListener { rulerOn = false; rulerPts.clear(); refreshRuler() }
         findViewById<View>(R.id.btnMenu).setOnClickListener { showMenu() }
         findViewById<View>(R.id.btnRec).setOnClickListener { toggleRecording() }
         buildChips()
@@ -246,12 +256,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onStart() { super.onStart(); mapView.onStart(); if (locActive) startLocation(false) }
+    override fun onStart() { super.onStart(); mapView.onStart(); compass.resume(); if (locActive) startLocation(false) }
     override fun onResume() { super.onResume(); mapView.onResume(); scheduleTick() }
     override fun onPause() { mapView.onPause(); ui.removeCallbacks(tick); super.onPause() }
-    override fun onStop() { if (!nav.navigating) stopLocationUpdates(); mapView.onStop(); super.onStop() }
+    override fun onStop() { compass.pause(); if (!nav.navigating) stopLocationUpdates(); mapView.onStop(); super.onStop() }
     override fun onLowMemory() { super.onLowMemory(); mapView.onLowMemory() }
-    override fun onDestroy() { nav.shutdown(); mapView.onDestroy(); super.onDestroy() }
+    override fun onDestroy() { compass.close(); nav.shutdown(); mapView.onDestroy(); super.onDestroy() }
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         mapView.onSaveInstanceState(outState)
@@ -328,7 +338,12 @@ class MainActivity : AppCompatActivity() {
         }
         m.addOnMapLongClickListener { ll -> showPlaceSheet(ll, null); true }
         m.addOnMapClickListener { ll ->
-            if (rulerOn) { rulerPts.add(ll); refreshRuler(); true } else false
+            if (rulerOn) {
+                // tap on an existing point removes it, tap elsewhere adds a new one
+                val hit = nearestRulerPoint(ll)
+                if (hit >= 0) rulerPts.removeAt(hit) else rulerPts.add(ll)
+                refreshRuler(); true
+            } else false
         }
         loadStyle()
     }
@@ -420,6 +435,7 @@ class MainActivity : AppCompatActivity() {
     private fun addOverlays(s: Style) {
         val night = isNight()
         nav.addLayers(s)
+        compass.addLayers(s)
         s.addSource(GeoJsonSource("ovl-search"))
         s.addLayer(CircleLayer("ovl-search-c", "ovl-search").withProperties(
             PropertyFactory.circleRadius(9f), PropertyFactory.circleColor(themeHex(R.attr.gCrosshair)),
@@ -476,7 +492,32 @@ class MainActivity : AppCompatActivity() {
     private fun refreshRuler() {
         src("ovl-ruler")?.setGeoJson(Geo.lineFc(rulerPts))
         src("ovl-ruler-pts")?.setGeoJson(Geo.pointFc(rulerPts))
+        updateRulerBar()
         updateInfo()
+    }
+
+    /** index of the ruler point within ~28 dp of the tap, or -1 */
+    private fun nearestRulerPoint(ll: LatLng): Int {
+        val pr = map?.projection ?: return -1
+        val t = pr.toScreenLocation(ll)
+        var best = -1
+        var bestD = dp(28).toDouble()
+        for ((i, p) in rulerPts.withIndex()) {
+            val sp = pr.toScreenLocation(p)
+            val d = Math.hypot((sp.x - t.x).toDouble(), (sp.y - t.y).toDouble())
+            if (d < bestD) { bestD = d; best = i }
+        }
+        return best
+    }
+
+    /** Ruler bar: shown while there is a ruler. Editing: undo / done / delete. Finished: edit / delete. */
+    private fun updateRulerBar() {
+        val bar = findViewById<View>(R.id.rulerBar)
+        bar.visibility = if (rulerOn || rulerPts.isNotEmpty()) View.VISIBLE else View.GONE
+        findViewById<TextView>(R.id.rulerText).text =
+            if (rulerPts.size < 2) "Линейка: нажимайте на карту" else "Линейка: " + Geo.fmtDist(Geo.length(rulerPts))
+        findViewById<View>(R.id.btnRulerUndo).visibility = if (rulerOn && rulerPts.isNotEmpty()) View.VISIBLE else View.GONE
+        findViewById<TextView>(R.id.btnRulerMode).text = if (rulerOn) "Готово" else "Изменить"
     }
 
     private fun refreshMe() {
@@ -510,7 +551,7 @@ class MainActivity : AppCompatActivity() {
             sb.append("\nGPS: ±").append(it.accuracy.roundToInt()).append(" м")
             if (it.hasAltitude()) sb.append(", высота ").append(it.altitude.roundToInt()).append(" м")
         } ?: run { if (locActive) sb.append("\nGPS: ожидание сигнала…") }
-        if (rulerOn) sb.append("\nЛиния: ").append(Geo.fmtDist(Geo.length(rulerPts)))
+        if (rulerPts.size >= 2) sb.append("\nЛиния: ").append(Geo.fmtDist(Geo.length(rulerPts)))
             .append(" (тап — новая точка)")
         if (TrackService.running) sb.append("\n● REC трек пишется")
         tvInfo.text = sb.toString()
@@ -590,6 +631,11 @@ class MainActivity : AppCompatActivity() {
             val first = myLoc == null
             myLoc = l
             refreshMe()
+            compass.onLocation(l)
+            pendingRoute?.let { p ->
+                pendingRoute = null
+                nav.planTo(p.first.latitude, p.first.longitude, p.second, l.latitude, l.longitude)
+            }
             if (nav.navigating) { nav.onLocation(l); updateInfo(); return }
             if ((first || following) && map != null) {
                 val z = maxOf(map!!.cameraPosition.zoom, 14.0)
@@ -724,19 +770,19 @@ class MainActivity : AppCompatActivity() {
             when (i) {
                 0 -> {
                     val langs = enabledLanguages().joinToString(" ") { it.name }
-                    val cats = (prefs.getStringSet("poi_cats", emptySet()) ?: emptySet()).size
                     add(menuRow("Языки названий", langs, act { showLanguageDialog() }))
-                    add(menuRow("Категории на карте", if (cats == 0) "все" else "$cats", act { showPoiDialog() }))
                     add(menuSwitch("Рельеф: тени гор", prefs.getBoolean("relief_on", true) && hasRelief, hasRelief) { on ->
                         prefs.edit().putBoolean("relief_on", on).apply(); style?.let { applyRelief(it) }
                     })
-                    add(menuSwitch("Линейка", rulerOn) { on ->
-                        rulerOn = on; if (!on) rulerPts.clear(); refreshRuler(); if (on) sheet.dismiss()
-                    })
-                    add(menuRow("Маршрут к центру карты", null, act {
-                        map?.cameraPosition?.target?.let { startRoute(it, "Центр карты") }
+                    add(menuRow("Компас", null, act { compass.openLast() }))
+                    add(menuRow("Кибла: направление на Мекку", null, act { compass.open(Compass.Kind.QIBLA) }))
+                    add(menuRow("Линейка", if (rulerPts.isEmpty()) null else Geo.fmtDist(Geo.length(rulerPts)), act {
+                        rulerOn = true; refreshRuler()
                     }))
-                    add(menuSwitch("Голосовые подсказки", prefs.getBoolean("nav_voice", true)) { on ->
+                    add(menuRow("Маршрут к перекрестию", null, act {
+                        map?.cameraPosition?.target?.let { startRoute(it, "Точка на карте") }
+                    }))
+                    add(menuSwitch("Голос в навигации", prefs.getBoolean("nav_voice", true)) { on ->
                         prefs.edit().putBoolean("nav_voice", on).apply()
                     })
                     add(menuSwitch("Избегать грунтовых дорог", prefs.getBoolean("nav_avoid_unpaved", true)) { on ->
@@ -756,7 +802,7 @@ class MainActivity : AppCompatActivity() {
                 else -> {
                     add(menuRow("Справка", null, act { showInfo() }))
                     add(menuRow("Диагностика", null, act { showDiagnostics() }))
-                    add(menuSwitch("Простые подписи (отладка)", prefs.getBoolean("labels_simple", false)) { on ->
+                    add(menuSwitch("Подписи одним языком (если пропали названия)", prefs.getBoolean("labels_simple", false)) { on ->
                         prefs.edit().putBoolean("labels_simple", on).apply(); style?.let { applyLabels(it) }
                     }, true)
                 }
@@ -808,8 +854,10 @@ class MainActivity : AppCompatActivity() {
 
         val cur = COLOR_THEMES.first { it.id == colorTheme() }
         content.addView(label("Цветовая тема: ${cur.title}", 14f, R.attr.gTextSecondary, true).apply { setPadding(dp(4), dp(24), 0, dp(12)) })
+        for (group in COLOR_THEMES.chunked(4)) {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; clipChildren = false }
-        for (ct in COLOR_THEMES) {
+        row.setPadding(0, 0, 0, dp(12))
+        for (ct in group) {
             val selected = ct.id == cur.id
             val dot = View(this).apply {
                 background = android.graphics.drawable.GradientDrawable().apply {
@@ -831,6 +879,7 @@ class MainActivity : AppCompatActivity() {
             row.addView(cell, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         }
         content.addView(row)
+        }
         content.addView(label(cur.about.replaceFirstChar { it.uppercase() }, 14f, R.attr.gHint).apply { setPadding(dp(4), dp(16), 0, 0) })
     }
 
@@ -874,38 +923,44 @@ class MainActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ routes
     private val backToStopNav = object : androidx.activity.OnBackPressedCallback(false) {
-        override fun handleOnBackPressed() { nav.stop() }
+        override fun handleOnBackPressed() { if (compass.isOpen) compass.close() else nav.stop() }
     }
 
     /** Hides the normal map controls while a route is previewed / driven. */
     private fun onNavModeChanged() {
-        val on = nav.active
-        backToStopNav.isEnabled = on
-        findViewById<View>(R.id.topColumn).visibility = if (on) View.GONE else View.VISIBLE
-        findViewById<View>(R.id.dock).visibility = if (on) View.GONE else View.VISIBLE
+        val navOn = nav.active
+        if (navOn && compass.isOpen) { compass.close(); return }     // closing calls this function again
+        val cmp = compass.isOpen
+        backToStopNav.isEnabled = navOn || cmp
+        findViewById<View>(R.id.topColumn).visibility = if (navOn) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.dock).visibility = if (navOn || cmp) View.GONE else View.VISIBLE
         val rc = findViewById<View>(R.id.rightControls)
-        (rc.layoutParams as android.widget.FrameLayout.LayoutParams).bottomMargin = dp(if (on) 112 else 88)
+        rc.visibility = if (cmp) View.GONE else View.VISIBLE
+        (rc.layoutParams as android.widget.FrameLayout.LayoutParams).bottomMargin = dp(if (navOn) 112 else 88)
         rc.requestLayout()
         if (nav.navigating && !locActive) withLocationPermission { startLocation(false) }
         updateInfo()
     }
 
-    /** Route from the current position (or from the map centre when there is no GPS fix yet). */
+    private var pendingRoute: Pair<LatLng, String>? = null
+
+    /** Route from the user's own GPS position. Without a fresh fix the app turns GPS on and waits for it. */
     private fun startRoute(to: LatLng, title: String) {
         val me = myLoc
-        if (me != null) {
+        if (me != null && System.currentTimeMillis() - me.time < 30_000) {
             nav.planTo(to.latitude, to.longitude, title, me.latitude, me.longitude)
             return
         }
-        val c = map?.cameraPosition?.target
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Местоположение не определено")
-            .setMessage("Включите GPS и подождите фиксации, либо постройте маршрут от центра карты.")
-            .setPositiveButton("От центра карты") { _, _ ->
-                if (c != null) nav.planTo(to.latitude, to.longitude, title, c.latitude, c.longitude)
-            }
-            .setNeutralButton("Включить GPS") { _, _ -> withLocationPermission { startLocation(false) } }
-            .setNegativeButton("Отмена", null).show()
+        pendingRoute = Pair(to, title)
+        Toast.makeText(this, "Определяю ваше местоположение…", Toast.LENGTH_SHORT).show()
+        withLocationPermission { startLocation(false) }
+        ui.postDelayed({
+            val p = pendingRoute ?: return@postDelayed
+            pendingRoute = null
+            val m = myLoc
+            if (m != null) nav.planTo(p.first.latitude, p.first.longitude, p.second, m.latitude, m.longitude)
+            else Toast.makeText(this, "Местоположение не найдено. Включите GPS и выйдите на открытое место", Toast.LENGTH_LONG).show()
+        }, 20_000)
     }
 
     /** Bottom card for a place (search result or long press): route, save, coordinates. */
@@ -927,7 +982,14 @@ class MainActivity : AppCompatActivity() {
             text = "Сохранить"; textSize = 16f; isAllCaps = false
             setOnClickListener { sheet.dismiss(); addWaypointDialog(ll) }
         }
-        row.addView(go, LinearLayout.LayoutParams(0, dp(56), 1f).apply { marginEnd = dp(12) })
+        val cmp = com.google.android.material.button.MaterialButton(this, null,
+            com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = "Компас"; textSize = 14f; isAllCaps = false
+            setOnClickListener { sheet.dismiss(); compass.open(Compass.Kind.PLACE, ll.latitude, ll.longitude, title ?: "Точка на карте") }
+        }
+        go.textSize = 14f; save.textSize = 14f
+        row.addView(go, LinearLayout.LayoutParams(0, dp(56), 1f).apply { marginEnd = dp(8) })
+        row.addView(cmp, LinearLayout.LayoutParams(0, dp(56), 1f).apply { marginEnd = dp(8) })
         row.addView(save, LinearLayout.LayoutParams(0, dp(56), 1f))
         root.addView(row)
         sheet.setContentView(root)
@@ -1273,7 +1335,10 @@ class MainActivity : AppCompatActivity() {
             ColorTheme("ocean", "Лагуна", "прохладная сине-бирюзовая гамма", "#1F6A98", "#7CC0EA"),
             ColorTheme("sand", "Песок", "тёплая «бумажная» гамма для чтения", "#A84D29", "#E8996F"),
             ColorTheme("dusk", "Сумерки", "мягкий лавандовый для вечера", "#6450AE", "#B5A6F0"),
-            ColorTheme("graphite", "Графит", "нейтральная серая, минимум отвлечения", "#A8531A", "#F0A868")
+            ColorTheme("graphite", "Графит", "строгая чёрно-белая гамма без цвета", "#25272B", "#E4E6E9"),
+            ColorTheme("sunset", "Закат", "нежный розово-коралловый", "#B23A5E", "#F29BB5"),
+            ColorTheme("mint", "Мята", "свежая бирюзово-мятная", "#0A7C7F", "#6FD6D2"),
+            ColorTheme("contrast", "Контраст", "максимум читаемости на солнце", "#0B3FBF", "#FFD400")
         )
 
         // quick filters on the map screen: emoji, short label, category key in POI_CATS (ordered by use on the road)
@@ -1281,7 +1346,7 @@ class MainActivity : AppCompatActivity() {
             Triple("⛽", "АЗС", "АЗС"), Triple("🍽", "Еда", "Еда и кафе"), Triple("🅿", "Парковки", "Парковки"),
             Triple("🏧", "Банкоматы", "Банки и банкоматы"), Triple("🛒", "Магазины", "Магазины"),
             Triple("💊", "Аптеки", "Аптеки"), Triple("🏥", "Больницы", "Больницы и врачи"),
-            Triple("🛏", "Ночлег", "Ночлег"), Triple("🚻", "Туалеты", "Туалеты"), Triple("💧", "Вода", "Вода и родники")
+            Triple("🏛", "Места", "Достопримечательности"), Triple("🛏", "Ночлег", "Ночлег"), Triple("🚻", "Туалеты", "Туалеты"), Triple("💧", "Вода", "Вода и родники")
         )
 
         private val POI_CATS: Map<String, List<String>> = linkedMapOf(

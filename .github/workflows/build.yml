@@ -131,10 +131,10 @@ jobs:
           rm -rf app/src/main/assets/glyphs
           python tools/build_glyphs.py app/src/main/assets/glyphs/NotoSans
 
-      - name: Generate map styles (5 colour themes x day/night)
+      - name: Generate map styles (all colour themes x day/night)
         run: |
           rm -f app/src/main/assets/style*.json
-          for t in forest ocean sand dusk graphite; do
+          for t in $(python tools/themes.py --list); do
             python tools/gen_style.py app/src/main/assets/style_$t.json --theme $t
             python tools/gen_style.py app/src/main/assets/style_${t}_dark.json --dark --theme $t
           done

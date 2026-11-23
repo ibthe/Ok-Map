@@ -15,7 +15,7 @@ RES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app", "src
 ATTRS = ["gSurface", "gPanel", "gStroke", "gFab", "gDialog", "gTextPrimary", "gTextSecondary", "gHint", "gIcon",
          "gAccent", "gOnAccent", "gAccentContainer", "gOnAccentContainer", "gCrosshair", "gCrosshairHalo",
          "gRaisedTop", "gRaisedBottom", "gRaisedEdge", "gAccentTop", "gAccentBottom", "gAccentEdge"]
-CAP = {"forest": "Forest", "ocean": "Ocean", "sand": "Sand", "dusk": "Dusk", "graphite": "Graphite"}
+CAP = {"forest": "Forest", "ocean": "Ocean", "sand": "Sand", "dusk": "Dusk", "graphite": "Graphite", "sunset": "Sunset", "mint": "Mint", "contrast": "Contrast"}
 
 
 def w(path, text):

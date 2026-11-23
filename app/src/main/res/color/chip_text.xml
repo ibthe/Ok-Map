@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- label colour of selectable chips: readable on both the raised key and the accent-filled (selected) key -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:color="?attr/gOnAccent" android:state_selected="true" />
+    <item android:color="?attr/gTextPrimary" />
+</selector>
