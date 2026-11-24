@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
     <style name="Theme.OkMap.Forest" parent="Base.Theme.OkMap">
+        <item name="gRim">#70FFFFFF</item>
         <item name="gSurface">#0F1512</item>
         <item name="gPanel">#EB151D19</item>
-        <item name="gStroke">#24FFFFFF</item>
+        <item name="gStroke">#3DFFFFFF</item>
         <item name="gFab">#F5151D19</item>
         <item name="gDialog">#1B2520</item>
         <item name="gTextPrimary">#E3ECE6</item>
@@ -16,7 +17,7 @@
         <item name="gOnAccentContainer">#D6EBDD</item>
         <item name="gRaisedTop">#FA2C3430</item>
         <item name="gRaisedBottom">#FA101714</item>
-        <item name="gRaisedEdge">#090D0B</item>
+        <item name="gRaisedEdge">#080C0A</item>
         <item name="gAccentTop">#8CD6B1</item>
         <item name="gAccentBottom">#6DB490</item>
         <item name="gAccentEdge">#4F8268</item>
@@ -37,13 +38,14 @@
         <item name="android:statusBarColor">#0F1512</item>
         <item name="android:navigationBarColor">#0F1512</item>
         <item name="android:windowBackground">#0F1512</item>
-        <item name="android:windowLightStatusBar">@bool/light_bars</item>
-        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
     </style>
     <style name="Theme.OkMap.Ocean" parent="Base.Theme.OkMap">
+        <item name="gRim">#70FFFFFF</item>
         <item name="gSurface">#0D141A</item>
         <item name="gPanel">#EB131C24</item>
-        <item name="gStroke">#24FFFFFF</item>
+        <item name="gStroke">#3DFFFFFF</item>
         <item name="gFab">#F5131C24</item>
         <item name="gDialog">#19232D</item>
         <item name="gTextPrimary">#E1EBF3</item>
@@ -56,7 +58,7 @@
         <item name="gOnAccentContainer">#D3E8F5</item>
         <item name="gRaisedTop">#FA2B333A</item>
         <item name="gRaisedBottom">#FA0F161C</item>
-        <item name="gRaisedEdge">#090D10</item>
+        <item name="gRaisedEdge">#080B0E</item>
         <item name="gAccentTop">#89C6EC</item>
         <item name="gAccentBottom">#6BA5C9</item>
         <item name="gAccentEdge">#4D7791</item>
@@ -77,13 +79,14 @@
         <item name="android:statusBarColor">#0D141A</item>
         <item name="android:navigationBarColor">#0D141A</item>
         <item name="android:windowBackground">#0D141A</item>
-        <item name="android:windowLightStatusBar">@bool/light_bars</item>
-        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
     </style>
     <style name="Theme.OkMap.Sand" parent="Base.Theme.OkMap">
+        <item name="gRim">#70FFFFFF</item>
         <item name="gSurface">#11141B</item>
         <item name="gPanel">#EB181C25</item>
-        <item name="gStroke">#24FFFFFF</item>
+        <item name="gStroke">#3DFFFFFF</item>
         <item name="gFab">#F5181C25</item>
         <item name="gDialog">#1F242E</item>
         <item name="gTextPrimary">#EEE8DC</item>
@@ -96,7 +99,7 @@
         <item name="gOnAccentContainer">#F5E3BD</item>
         <item name="gRaisedTop">#FA2F333B</item>
         <item name="gRaisedBottom">#FA13161D</item>
-        <item name="gRaisedEdge">#0B0D11</item>
+        <item name="gRaisedEdge">#0A0B0F</item>
         <item name="gAccentTop">#EAC079</item>
         <item name="gAccentBottom">#C89F5B</item>
         <item name="gAccentEdge">#907342</item>
@@ -117,13 +120,14 @@
         <item name="android:statusBarColor">#11141B</item>
         <item name="android:navigationBarColor">#11141B</item>
         <item name="android:windowBackground">#11141B</item>
-        <item name="android:windowLightStatusBar">@bool/light_bars</item>
-        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
     </style>
     <style name="Theme.OkMap.Dusk" parent="Base.Theme.OkMap">
+        <item name="gRim">#70FFFFFF</item>
         <item name="gSurface">#121019</item>
         <item name="gPanel">#EB181624</item>
-        <item name="gStroke">#24FFFFFF</item>
+        <item name="gStroke">#3DFFFFFF</item>
         <item name="gFab">#F5181624</item>
         <item name="gDialog">#1F1C2D</item>
         <item name="gTextPrimary">#E8E5F3</item>
@@ -136,7 +140,7 @@
         <item name="gOnAccentContainer">#E3DDF6</item>
         <item name="gRaisedTop">#FA2F2D3A</item>
         <item name="gRaisedBottom">#FA13111C</item>
-        <item name="gRaisedEdge">#0B0A10</item>
+        <item name="gRaisedEdge">#0A090E</item>
         <item name="gAccentTop">#BCAFF2</item>
         <item name="gAccentBottom">#9C8FCE</item>
         <item name="gAccentEdge">#706795</item>
@@ -157,13 +161,14 @@
         <item name="android:statusBarColor">#121019</item>
         <item name="android:navigationBarColor">#121019</item>
         <item name="android:windowBackground">#121019</item>
-        <item name="android:windowLightStatusBar">@bool/light_bars</item>
-        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
     </style>
     <style name="Theme.OkMap.Graphite" parent="Base.Theme.OkMap">
+        <item name="gRim">#70FFFFFF</item>
         <item name="gSurface">#101112</item>
         <item name="gPanel">#EB17181A</item>
-        <item name="gStroke">#24FFFFFF</item>
+        <item name="gStroke">#3DFFFFFF</item>
         <item name="gFab">#F517181A</item>
         <item name="gDialog">#1E1F21</item>
         <item name="gTextPrimary">#ECEDEE</item>
@@ -176,7 +181,7 @@
         <item name="gOnAccentContainer">#E3E4E6</item>
         <item name="gRaisedTop">#FA2E2F31</item>
         <item name="gRaisedBottom">#FA121314</item>
-        <item name="gRaisedEdge">#0A0B0C</item>
+        <item name="gRaisedEdge">#090A0A</item>
         <item name="gAccentTop">#E7E8EB</item>
         <item name="gAccentBottom">#C4C6C8</item>
         <item name="gAccentEdge">#8D8F90</item>
@@ -197,13 +202,14 @@
         <item name="android:statusBarColor">#101112</item>
         <item name="android:navigationBarColor">#101112</item>
         <item name="android:windowBackground">#101112</item>
-        <item name="android:windowLightStatusBar">@bool/light_bars</item>
-        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
     </style>
     <style name="Theme.OkMap.Sunset" parent="Base.Theme.OkMap">
+        <item name="gRim">#70FFFFFF</item>
         <item name="gSurface">#171012</item>
         <item name="gPanel">#EB1F1619</item>
-        <item name="gStroke">#24FFFFFF</item>
+        <item name="gStroke">#3DFFFFFF</item>
         <item name="gFab">#F51F1619</item>
         <item name="gDialog">#271C20</item>
         <item name="gTextPrimary">#F1E4E7</item>
@@ -216,7 +222,7 @@
         <item name="gOnAccentContainer">#F6DCE3</item>
         <item name="gRaisedTop">#FA352D30</item>
         <item name="gRaisedBottom">#FA181114</item>
-        <item name="gRaisedEdge">#0E0A0B</item>
+        <item name="gRaisedEdge">#0C090A</item>
         <item name="gAccentTop">#F3A5BC</item>
         <item name="gAccentBottom">#D0859C</item>
         <item name="gAccentEdge">#966070</item>
@@ -237,13 +243,14 @@
         <item name="android:statusBarColor">#171012</item>
         <item name="android:navigationBarColor">#171012</item>
         <item name="android:windowBackground">#171012</item>
-        <item name="android:windowLightStatusBar">@bool/light_bars</item>
-        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
     </style>
     <style name="Theme.OkMap.Mint" parent="Base.Theme.OkMap">
+        <item name="gRim">#70FFFFFF</item>
         <item name="gSurface">#0B1514</item>
         <item name="gPanel">#EB111D1C</item>
-        <item name="gStroke">#24FFFFFF</item>
+        <item name="gStroke">#3DFFFFFF</item>
         <item name="gFab">#F5111D1C</item>
         <item name="gDialog">#172625</item>
         <item name="gTextPrimary">#DDF0EE</item>
@@ -256,7 +263,7 @@
         <item name="gOnAccentContainer">#CDEDEA</item>
         <item name="gRaisedTop">#FA293433</item>
         <item name="gRaisedBottom">#FA0D1716</item>
-        <item name="gRaisedEdge">#080D0D</item>
+        <item name="gRaisedEdge">#070C0B</item>
         <item name="gAccentTop">#7DDAD6</item>
         <item name="gAccentBottom">#5FB8B5</item>
         <item name="gAccentEdge">#458582</item>
@@ -277,13 +284,14 @@
         <item name="android:statusBarColor">#0B1514</item>
         <item name="android:navigationBarColor">#0B1514</item>
         <item name="android:windowBackground">#0B1514</item>
-        <item name="android:windowLightStatusBar">@bool/light_bars</item>
-        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
     </style>
     <style name="Theme.OkMap.Contrast" parent="Base.Theme.OkMap">
+        <item name="gRim">#70FFFFFF</item>
         <item name="gSurface">#000000</item>
         <item name="gPanel">#EB0C0C0C</item>
-        <item name="gStroke">#24FFFFFF</item>
+        <item name="gStroke">#3DFFFFFF</item>
         <item name="gFab">#F50C0C0C</item>
         <item name="gDialog">#141414</item>
         <item name="gTextPrimary">#FFFFFF</item>
@@ -317,7 +325,7 @@
         <item name="android:statusBarColor">#000000</item>
         <item name="android:navigationBarColor">#000000</item>
         <item name="android:windowBackground">#000000</item>
-        <item name="android:windowLightStatusBar">@bool/light_bars</item>
-        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
     </style>
 </resources>

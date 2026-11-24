@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """Generates the map style (OpenMapTiles schema, fully offline).
-Usage: gen_style.py <out.json> [--dark] [--theme forest|ocean|sand|dusk|graphite]"""
+Usage: gen_style.py <out.json> [--dark | --dim] [--theme <id>]   or   gen_style.py <out.json> --sat [--dark]
+(--dim = evening brightness between day and night; --sat = stylised satellite look, with optional real imagery)"""
 import json, sys
 
 import themes
 
-DARK = "--dark" in sys.argv
+NIGHT = "--dark" in sys.argv
+DIM = "--dim" in sys.argv
+SAT = "--sat" in sys.argv
+DARK = NIGHT or DIM or SAT          # all three are drawn from the dark base colours
 THEME = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--theme=")), "forest")
 if "--theme" in sys.argv:
     THEME = sys.argv[sys.argv.index("--theme") + 1]
 if THEME not in themes.THEMES:
     sys.exit("unknown theme " + THEME)
-MAPT = themes.THEMES[THEME].get("map_dark") if DARK and themes.THEMES[THEME].get("map_dark") else themes.THEMES[THEME]["map"]
+MAPT = themes.SAT_MAP if SAT else (themes.THEMES[THEME].get("map_dark") if NIGHT and themes.THEMES[THEME].get("map_dark") else themes.THEMES[THEME]["map"])
 args = [a for a in sys.argv[1:] if not a.startswith("--") and a != THEME]
 SRC = "openmaptiles"
 FONT = ["NotoSans"]
@@ -20,7 +24,7 @@ L = []
 
 def c(light, dark):
     """base colour of the day / night style, re-tinted for the selected colour theme"""
-    return themes.map_color(dark if DARK else light, MAPT, DARK)
+    return themes.map_color(dark if DARK else light, MAPT, DARK, "sat" if SAT else ("dim" if DIM else None), SAT and NIGHT)
 
 
 def zi(*stops, base=1.4):
@@ -102,7 +106,9 @@ layer("landuse-institution", "fill", "landuse", cls("school", "university", "col
 layer("landuse-hospital", "fill", "landuse", cls("hospital"), minzoom=12,
       paint={"fill-color": c("#f3dcdc", "#33262a")})
 layer("landuse-station", "fill", "landuse", cls("bus_station"), minzoom=13,
-      paint={"fill-color": c("#e7e3dc", "#262a30")})
+      paint={"fill-color": c("#f0e2cc", "#33291f")})
+layer("landuse-station-outline", "line", "landuse", cls("bus_station"), minzoom=13,
+      paint={"line-color": c("#c98a3a", "#e0a060"), "line-width": 1.4, "line-dasharray": [3, 2]})
 
 layer("park", "fill", "park", minzoom=5,
       paint={"fill-color": c("#bfdca6", "#25382b"), "fill-opacity": zi((5, 0.22), (10, 0.42), base=1)})
@@ -133,8 +139,12 @@ layer("waterway-minor", "line", "waterway", cls("stream", "canal", "drain", "dit
       layout={"line-cap": "round", "line-join": "round"},
       paint={"line-color": WATER, "line-width": zi((11, 0.4), (14, 1.2), (16, 2.2), (18, 4.5))})
 
-layer("aeroway-area", "fill", "aeroway", ["==", ["geometry-type"], "Polygon"], minzoom=11,
-      paint={"fill-color": c("#e3e0da", "#262a2f")})
+layer("aeroway-area", "fill", "aeroway", ["==", ["geometry-type"], "Polygon"], minzoom=9,
+      paint={"fill-color": c("#e2dff0", "#2a2838"), "fill-opacity": 0.85})
+layer("aeroway-outline", "line", "aeroway", ["==", ["geometry-type"], "Polygon"], minzoom=9,
+      layout={"line-join": "round"},
+      paint={"line-color": c("#7f6fb8", "#a898d0"), "line-width": zi((9, 1.0), (13, 1.8), (16, 2.6)),
+             "line-dasharray": [3, 2]})
 layer("aeroway-runway", "line", "aeroway", ["all", ["==", ["geometry-type"], "LineString"], cls("runway")],
       minzoom=10, paint={"line-color": c("#cfcbc3", "#3a3e44"), "line-width": zi((10, 1), (14, 6), (18, 40))})
 layer("aeroway-taxiway", "line", "aeroway", ["all", ["==", ["geometry-type"], "LineString"], cls("taxiway")],
@@ -255,23 +265,19 @@ layer("poi-dot", "circle", "poi", ["all", ["has", "name"], NOT_TR], minzoom=15,
       paint={"circle-radius": 3, "circle-color": c("#8793a5", "#9aa7bb"), "circle-stroke-width": 1,
              "circle-stroke-color": c("#ffffff", "#1c1f24")})
 
-# transport: railway stations, metro, bus stations, stops, ferry terminals, airports
-STROKE = c("#ffffff", "#1c1f24")
-layer("tr-stop-dot", "circle", "poi", anyc("bus_stop", "tram_stop"), minzoom=15,
-      paint={"circle-radius": 2.6, "circle-color": c("#d9822b", "#e0a060"), "circle-stroke-width": 0.8,
-             "circle-stroke-color": STROKE})
-layer("tr-bus-dot", "circle", "poi", anyc("bus_station"), minzoom=12,
-      paint={"circle-radius": zi((12, 3.5), (16, 5.5)), "circle-color": c("#d9822b", "#e0a060"),
-             "circle-stroke-width": 1.2, "circle-stroke-color": STROKE})
-layer("tr-ferry-dot", "circle", "poi", anyc("ferry_terminal", "harbor"), minzoom=11,
-      paint={"circle-radius": zi((11, 3.5), (16, 5.5)), "circle-color": c("#2a9d8f", "#4cc3b3"),
-             "circle-stroke-width": 1.2, "circle-stroke-color": STROKE})
-layer("tr-station-dot", "circle", "poi", anyc("station", "halt", "subway"), minzoom=10,
-      paint={"circle-radius": zi((10, 3), (14, 4.5), (17, 6.5)), "circle-color": c("#1e6fd9", "#5aa0f0"),
-             "circle-stroke-width": 1.4, "circle-stroke-color": STROKE})
-layer("tr-aerodrome-dot", "circle", "aerodrome_label", ["!=", ["get", "class"], "private"], minzoom=7,
-      paint={"circle-radius": zi((7, 3.5), (12, 6)), "circle-color": c("#6b5b95", "#a898d0"),
-             "circle-stroke-width": 1.4, "circle-stroke-color": STROKE})
+# transport: railway stations, metro, bus stations, stops, ferry terminals, airports.
+# Drawn as badge icons ("ic-train", "ic-bus", "ic-stop", "ic-ferry", "ic-plane"): the app renders them and adds them to the style.
+def icon(id, sl, filt, image, minzoom, sizes):
+    layer(id, "symbol", sl, filt, minzoom=minzoom, source="openmaptiles-labels",
+          layout={"icon-image": image, "icon-size": zi(*sizes), "icon-allow-overlap": True,
+                  "icon-ignore-placement": True, "icon-anchor": "center"})
+
+
+icon("tr-stop-dot", "poi", anyc("bus_stop", "tram_stop"), "ic-stop", 15, [(15, 0.5), (18, 0.75)])
+icon("tr-bus-dot", "poi", anyc("bus_station"), "ic-bus", 12, [(12, 0.6), (16, 0.95)])
+icon("tr-ferry-dot", "poi", anyc("ferry_terminal", "harbor"), "ic-ferry", 11, [(11, 0.6), (16, 0.95)])
+icon("tr-station-dot", "poi", anyc("station", "halt", "subway"), "ic-train", 10, [(10, 0.55), (14, 0.8), (17, 1.05)])
+icon("tr-aerodrome-dot", "aerodrome_label", ["!=", ["get", "class"], "private"], "ic-plane", 7, [(7, 0.6), (12, 0.95)])
 
 # ------------------------------------------------------------------ labels
 # Symbol layers whose id starts with "lbl-" get their text-field replaced at runtime (LabelExpr.kt).
@@ -337,15 +343,27 @@ label("lbl-state", "place", cls("state", "province"), 4, zi((4, 10), (8, 14)), c
 label("lbl-country", "place", cls("country"), 2, zi((2, 11), (5, 15), (8, 22)), c("#4a4458", "#d6cfe6"),
       maxzoom=9, sort=RANK, width=7, spacing=0.12)
 
+if SAT:
+    for l in L:
+        if l["id"] == "relief-hillshade":
+            l["paint"] = {"hillshade-exaggeration": zi((5, 0.62), (9, 0.52), (12, 0.34), (14, 0.22), base=1),
+                          "hillshade-illumination-direction": 315, "hillshade-shadow-color": "#000000",
+                          "hillshade-highlight-color": "#ffffff", "hillshade-accent-color": "#1c261c"}
+    # real imagery (optional sat.mbtiles, raster): drawn right above the background; the app hides the flat
+    # land / water fills when the file exists, and removes this layer when it does not
+    L.insert(1, {"id": "sat-imagery", "type": "raster", "source": "sat", "paint": {"raster-fade-duration": 0}})
+
 style = {
     "version": 8,
-    "name": "Ok Map " + THEME + (" Dark" if DARK else ""),
+    "name": "Ok Map " + ("Satellite" if SAT else THEME) + (" Dark" if NIGHT else " Dim" if DIM else ""),
     "sources": {
         SRC: {"type": "vector", "url": "__MBTILES_URL__",
               "attribution": "© OpenStreetMap contributors, © OpenMapTiles, © Natural Earth"},
         # same tiles, second source: symbol layers wait for glyphs; keeping them apart means a glyph
         # problem can never hide the roads/water/landcover of a tile
         "openmaptiles-labels": {"type": "vector", "url": "__MBTILES_URL__"},
+        **({"sat": {"type": "raster", "url": "__SAT_URL__", "tileSize": 256,
+                    "attribution": "Imagery: see the provider of sat.mbtiles"}} if SAT else {}),
         "relief": {"type": "raster-dem", "url": "__RELIEF_URL__", "tileSize": 256, "encoding": "terrarium",
                    "attribution": "Terrain: Mapzen/AWS Terrain Tiles (SRTM, ASTER, others)"},
     },
@@ -356,4 +374,4 @@ style = {
 out = args[0] if args else "app/src/main/assets/style.json"
 with open(out, "w", encoding="utf-8") as f:
     json.dump(style, f, ensure_ascii=False, indent=1)
-print("wrote", out, len(L), "layers", "(dark)" if DARK else "")
+print("wrote", out, len(L), "layers", "(sat)" if SAT else "", "(dark)" if NIGHT else "(dim)" if DIM else "")

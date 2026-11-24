@@ -18,6 +18,7 @@ import android.graphics.Color
 import android.os.Bundle
 import android.widget.LinearLayout
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.view.Gravity
 import android.os.Handler
 import android.os.Looper
@@ -118,29 +119,17 @@ class MainActivity : AppCompatActivity() {
     // ============================================================ lifecycle
 
     /** "auto" follows the system, "light" / "dark" force the app UI and the map style. */
+    /** "light" (day), "dim" (evening: between day and night) or "dark" (night). Old values ("auto") become day. */
     private fun themeMode(): String {
-        val sp = getSharedPreferences("settings", MODE_PRIVATE)
-        val m = sp.getString("theme_mode", null)
-        if (m != null) return m
-        return if (sp.getBoolean("dark_map", false)) "dark" else "auto"   // migrate the old toggle
+        val m = getSharedPreferences("settings", MODE_PRIVATE).getString("theme_mode", "light")
+        return if (m == "dim" || m == "dark") m else "light"
     }
 
     private fun applyThemeMode(m: String) {
-        AppCompatDelegate.setDefaultNightMode(
-            when (m) {
-                "light" -> AppCompatDelegate.MODE_NIGHT_NO
-                "dark" -> AppCompatDelegate.MODE_NIGHT_YES
-                else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
-            }
-        )
+        AppCompatDelegate.setDefaultNightMode(if (m == "dark") AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO)
     }
 
-    private fun isNight(): Boolean = when (themeMode()) {
-        "dark" -> true
-        "light" -> false
-        else -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-            android.content.res.Configuration.UI_MODE_NIGHT_YES
-    }
+    private fun isNight(): Boolean = themeMode() != "light"     // evening and night use the dark overlay colours
 
     /** One of 5 colour themes (UI + map), stored as an id; day/night is chosen separately by [themeMode]. */
     /** Extent of the installed map data (MBTiles "bounds" = west,south,east,north), so "whole map" fits any region. */
@@ -163,15 +152,18 @@ class MainActivity : AppCompatActivity() {
         return if (COLOR_THEMES.any { it.id == id }) id else "forest"
     }
 
-    private fun colorThemeStyle(): Int = when (colorTheme()) {
-        "ocean" -> R.style.Theme_OkMap_Ocean
-        "sand" -> R.style.Theme_OkMap_Sand
-        "dusk" -> R.style.Theme_OkMap_Dusk
-        "graphite" -> R.style.Theme_OkMap_Graphite
-        "sunset" -> R.style.Theme_OkMap_Sunset
-        "mint" -> R.style.Theme_OkMap_Mint
-        "contrast" -> R.style.Theme_OkMap_Contrast
-        else -> R.style.Theme_OkMap_Forest
+    private fun colorThemeStyle(): Int {
+        val dim = themeMode() == "dim"
+        return when (colorTheme()) {
+            "ocean" -> if (dim) R.style.Theme_OkMap_Ocean_Dim else R.style.Theme_OkMap_Ocean
+            "sand" -> if (dim) R.style.Theme_OkMap_Sand_Dim else R.style.Theme_OkMap_Sand
+            "dusk" -> if (dim) R.style.Theme_OkMap_Dusk_Dim else R.style.Theme_OkMap_Dusk
+            "graphite" -> if (dim) R.style.Theme_OkMap_Graphite_Dim else R.style.Theme_OkMap_Graphite
+            "sunset" -> if (dim) R.style.Theme_OkMap_Sunset_Dim else R.style.Theme_OkMap_Sunset
+            "mint" -> if (dim) R.style.Theme_OkMap_Mint_Dim else R.style.Theme_OkMap_Mint
+            "contrast" -> if (dim) R.style.Theme_OkMap_Contrast_Dim else R.style.Theme_OkMap_Contrast
+            else -> if (dim) R.style.Theme_OkMap_Forest_Dim else R.style.Theme_OkMap_Forest
+        }
     }
 
     /** Colour of a theme attribute as "#RRGGBB" (for map overlay layers). */
@@ -210,7 +202,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.btnRulerDelete).setOnClickListener { rulerOn = false; rulerPts.clear(); refreshRuler() }
         findViewById<View>(R.id.btnMenu).setOnClickListener { showMenu() }
         findViewById<View>(R.id.btnRec).setOnClickListener { toggleRecording() }
-        buildChips()
+        applyOpacity()
         updateRecButton()
         if (prefs.getBoolean("reopen_menu", false)) {     // a theme / brightness change recreated the screen: show the menu again
             prefs.edit().putBoolean("reopen_menu", false).apply()
@@ -354,26 +346,43 @@ class MainActivity : AppCompatActivity() {
         loadStyle()
     }
 
+    private fun mapType(): String = prefs.getString("map_type", "scheme") ?: "scheme"
+
     private fun loadStyle() {
         val m = map ?: return
         val tiles = tilesFile ?: return
-        val name = "style_" + colorTheme() + (if (isNight()) "_dark" else "") + ".json"
+        val mode = themeMode()
+        val sat = mapType() == "sat"
+        val name = if (sat) "style_sat" + (if (mode == "dark") "_dark" else "") + ".json"
+        else "style_" + colorTheme() + (when (mode) { "dark" -> "_dark"; "dim" -> "_dim"; else -> "" }) + ".json"
         val relief = File(filesDir, "relief.mbtiles")
+        val imagery = File(filesDir, "sat.mbtiles")
         val obj = JSONObject(assets.open(name).bufferedReader().use { it.readText() })
-        if (!relief.exists()) {
-            obj.getJSONObject("sources").remove("relief")
-            val src = obj.getJSONArray("layers")
-            val dst = JSONArray()
-            for (i in 0 until src.length()) {
-                val l = src.getJSONObject(i)
-                if (l.optString("id") != "relief-hillshade") dst.put(l)
+        val src = obj.getJSONArray("layers")
+        val dst = JSONArray()
+        val hasImagery = sat && imagery.exists()
+        for (i in 0 until src.length()) {
+            val l = src.getJSONObject(i)
+            val id = l.optString("id")
+            if (id == "relief-hillshade" && !relief.exists()) continue
+            if (id == "sat-imagery" && !hasImagery) continue
+            // with real imagery the flat land / water fills would cover it: hide them, keep lines, icons and labels
+            if (hasImagery && (l.optString("type") == "fill" || l.optString("type") == "background")) {
+                val lay = l.optJSONObject("layout") ?: JSONObject().also { l.put("layout", it) }
+                lay.put("visibility", "none")
             }
-            obj.put("layers", dst)
+            dst.put(l)
         }
+        obj.put("layers", dst)
+        if (!relief.exists()) obj.getJSONObject("sources").remove("relief")
+        if (!hasImagery) obj.getJSONObject("sources").remove("sat")
         val json = obj.toString()
             .replace("__MBTILES_URL__", "mbtiles://" + tiles.absolutePath)
             .replace("__RELIEF_URL__", "mbtiles://" + relief.absolutePath)
-        m.setStyle(Style.Builder().fromJson(json)) { s ->
+            .replace("__SAT_URL__", "mbtiles://" + imagery.absolutePath)
+        val builder = Style.Builder().fromJson(json)
+        for ((id, bmp) in MapIcons.all(this)) builder.withImage(id, bmp)
+        m.setStyle(builder) { s ->
             style = s
             addOverlays(s)
             applyLabels(s)
@@ -721,6 +730,26 @@ class MainActivity : AppCompatActivity() {
         layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
     }
 
+    /** Bottom sheets: a clearly visible top edge (outline + shadow), a dimmed map behind and a drag handle. */
+    private fun styleSheet(sheet: com.google.android.material.bottomsheet.BottomSheetDialog) {
+        sheet.window?.setDimAmount(0.5f)
+        val v = sheet.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet) ?: return
+        val r = dp(28).toFloat()
+        v.background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(themeColor(R.attr.gDialog))
+            cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
+            setStroke(dp(2), themeColor(R.attr.gRim))
+        }
+        v.elevation = dp(24).toFloat()
+    }
+
+    private fun dragHandle() = View(this).apply {
+        background = android.graphics.drawable.GradientDrawable().apply {
+            cornerRadius = dp(3).toFloat(); setColor(themeColor(R.attr.gHint))
+        }
+        layoutParams = LinearLayout.LayoutParams(dp(44), dp(5)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(14); topMargin = dp(2) }
+    }
+
     /** One row: title (+ optional grey hint) on the left, current value and a chevron on the right. */
     private fun menuRow(title: String, value: String? = null, sub: String? = null, onClick: () -> Unit): View {
         val row = LinearLayout(this).apply {
@@ -764,6 +793,35 @@ class MainActivity : AppCompatActivity() {
         return row
     }
 
+    /** Scheme / Satellite. Satellite = stylised natural-colour relief map; real imagery appears if sat.mbtiles is installed. */
+    private fun mapTypeSwitch(): View {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(4), 0, dp(12)) }
+        val g = com.google.android.material.button.MaterialButtonToggleGroup(this).apply { isSingleSelection = true; isSelectionRequired = true }
+        val types = listOf("scheme" to "Схема", "sat" to "Спутник")
+        val ids = types.map { View.generateViewId() }
+        types.forEachIndexed { i, t ->
+            g.addView(com.google.android.material.button.MaterialButton(this, null,
+                com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                id = ids[i]; text = t.second; textSize = 14f; isAllCaps = false
+                layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f)
+            })
+        }
+        g.check(ids[types.indexOfFirst { it.first == mapType() }.coerceAtLeast(0)])
+        g.addOnButtonCheckedListener { _, id, checked ->
+            val t = types[ids.indexOf(id)].first
+            if (checked && t != mapType()) {
+                prefs.edit().putString("map_type", t).apply()
+                loadStyle()
+                if (t == "sat" && !File(filesDir, "sat.mbtiles").exists() && !prefs.getBoolean("sat_hint", false)) {
+                    prefs.edit().putBoolean("sat_hint", true).apply()
+                    toast("Спутниковых снимков в приложении нет: показан спутниковый вид из данных карты и рельефа")
+                }
+            }
+        }
+        box.addView(g, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        return box
+    }
+
     private fun note(text: String) = label(text, 13f, R.attr.gHint).apply { setPadding(dp(4), dp(12), dp(4), dp(4)) }
 
     /** Raised "key" button (same look as the on-map buttons). */
@@ -783,8 +841,10 @@ class MainActivity : AppCompatActivity() {
         setOnClickListener { onClick() }
     }
 
-    // menu categories, named by what they are for
-    private val MENU_TABS = listOf("🗺" to "Карта", "🧭" to "Навигация", "📍" to "Мои места", "🎨" to "Оформление", "📖" to "Справка")
+    // menu categories: one line-icon style, the name of the open page is shown as a heading
+    private val MENU_TABS = listOf(
+        R.drawable.ic_tab_map to "Карта", R.drawable.ic_tab_nav to "Навигация", R.drawable.ic_tab_places to "Мои места",
+        R.drawable.ic_tab_theme to "Оформление", R.drawable.ic_tab_info to "Справка")
 
     private fun showMenu() {
         val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
@@ -804,6 +864,7 @@ class MainActivity : AppCompatActivity() {
             when (i) {
                 0 -> {   // MAP: what is drawn
                     val langs = enabledLanguages().joinToString(" ") { it.name }
+                    add(mapTypeSwitch())
                     add(menuRow("Языки названий", langs, null, act { showLanguageDialog() }))
                     add(menuSwitch("Рельеф", prefs.getBoolean("relief_on", true) && hasRelief, hasRelief,
                         if (hasRelief) "Тени гор на карте" else "Нет данных рельефа") { on ->
@@ -852,47 +913,83 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // tab bar: emoji above a short label, the active tab is "pressed in"
+        // tab bar: icons only (same size and stroke), the active tab is "pressed in" and tinted with the accent
+        val heading = label("", 22f, R.attr.gTextPrimary, true).apply { setPadding(dp(4), 0, 0, dp(4)) }
         val tabRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val tabs = ArrayList<View>()
-        fun selectTab(i: Int) { tabs.forEachIndexed { k, v -> v.isSelected = k == i }; page(i) }
-        MENU_TABS.forEachIndexed { i, (emoji, name) ->
-            val tab = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_chip)
+        fun selectTab(i: Int) { tabs.forEachIndexed { k, v -> v.isSelected = k == i }; heading.text = MENU_TABS[i].second; page(i) }
+        MENU_TABS.forEachIndexed { i, (icon, name) ->
+            val tab = ImageView(this).apply {
+                setImageResource(icon)
+                imageTintList = resources.getColorStateList(R.color.chip_text, theme)
+                scaleType = ImageView.ScaleType.CENTER
+                background = Skin.chip(this@MainActivity, 1f)
                 stateListAnimator = android.animation.AnimatorInflater.loadStateListAnimator(this@MainActivity, R.animator.press)
                 isClickable = true
                 isFocusable = true
-                setPadding(dp(2), dp(4), dp(2), dp(7))
+                contentDescription = name
                 setOnClickListener { selectTab(i) }
             }
-            tab.addView(TextView(this).apply { text = emoji; textSize = 20f; gravity = Gravity.CENTER; isDuplicateParentStateEnabled = true })
-            tab.addView(TextView(this).apply {
-                text = name; gravity = Gravity.CENTER; maxLines = 1
-                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
-                setTextColor(resources.getColorStateList(R.color.chip_text, theme))
-                isDuplicateParentStateEnabled = true
-                androidx.core.widget.TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
-                    this, 9, 12, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(16)))
             tabs.add(tab)
-            tabRow.addView(tab, LinearLayout.LayoutParams(0, dp(64), 1f).apply { if (i < MENU_TABS.size - 1) marginEnd = dp(6) })
+            tabRow.addView(tab, LinearLayout.LayoutParams(0, dp(52), 1f).apply { if (i < MENU_TABS.size - 1) marginEnd = dp(8) })
         }
+        root.addView(dragHandle())
         root.addView(tabRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            .apply { bottomMargin = dp(12) })
+            .apply { bottomMargin = dp(14) })
+        root.addView(heading)
         root.addView(content)
         sheet.setContentView(root)
+        styleSheet(sheet)
         sheet.behavior.skipCollapsed = true
         sheet.setOnShowListener { sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED }
         selectTab(prefs.getInt("menu_tab", 0).coerceIn(0, MENU_TABS.size - 1))
         sheet.show()
     }
 
+    private fun uiOpacity(): Float = prefs.getFloat("ui_opacity", 0.92f)
+
+    /** Panel transparency: only the fill fades, the outline and the key edges stay, so panels stay visible over the map. */
+    private fun opacityControl(): View {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(20), 0, 0) }
+        val title = label("Прозрачность панелей: ${(uiOpacity() * 100).roundToInt()}%", 14f, R.attr.gTextSecondary, true).apply { setPadding(dp(4), 0, 0, 0) }
+        val sl = com.google.android.material.slider.Slider(this).apply {
+            valueFrom = 0.35f; valueTo = 1f; stepSize = 0.05f; value = uiOpacity().coerceIn(0.35f, 1f)
+            addOnChangeListener { _, v, fromUser ->
+                title.text = "Прозрачность панелей: ${(v * 100).roundToInt()}%"
+                if (fromUser) { prefs.edit().putFloat("ui_opacity", v).apply(); applyOpacity() }   // live preview behind the sheet
+            }
+        }
+        box.addView(title)
+        box.addView(sl)
+        return box
+    }
+
+    /** Re-draws panels and keys with the chosen fill opacity (outline stays opaque; text gets a soft glow when panels are see-through). */
+    private fun applyOpacity() {
+        val a = uiOpacity()
+        fun panel(id: Int, r: Float) { findViewById<View>(id)?.background = Skin.panel(this, r, a) }
+        panel(R.id.searchBar, 28f); panel(R.id.rulerBar, 20f); panel(R.id.navTop, 20f); panel(R.id.navBottom, 20f)
+        panel(R.id.compassPanel, 20f); panel(R.id.lvResults, 20f); panel(R.id.tvInfo, 12f)
+        for (id in listOf(R.id.btnFit, R.id.btnLocation, R.id.btnCompass, R.id.btnMenu, R.id.btnRec))
+            findViewById<View>(id)?.background = Skin.key(this, true, 28f, a)
+        for (id in listOf(R.id.btnNavCancel, R.id.btnCompassClose, R.id.btnRulerUndo, R.id.btnRulerDelete))
+            findViewById<View>(id)?.background = Skin.key(this, false, 28f, a)
+        for (id in listOf(R.id.btnCompassMap, R.id.chipNorth, R.id.chipQibla, R.id.chipPlace))
+            findViewById<View>(id)?.background = Skin.chip(this, a)
+        findViewById<View>(R.id.btnPoint)?.background = Skin.key(this, false, 28f, 1f, accent = true)
+        findViewById<View>(R.id.btnNavGo)?.background = Skin.key(this, false, 28f, 1f, accent = true)
+        findViewById<View>(R.id.btnRulerMode)?.background = Skin.key(this, false, 28f, 1f, accent = true)
+        val glow = a < 0.8f
+        val halo = themeColor(R.attr.gSurface)
+        for (id in listOf(R.id.tvInfo, R.id.rulerText, R.id.navDist, R.id.navText, R.id.navStat, R.id.navSub, R.id.cTitle, R.id.cInfo, R.id.cGuide, R.id.cCal))
+            findViewById<TextView>(id)?.setShadowLayer(if (glow) dp(4).toFloat() else 0f, 0f, 0f, halo)
+        buildChips()
+    }
+
     /** Appearance: brightness as a 3-way switch, colour themes as round swatches. Changing either keeps the menu open on this tab. */
     private fun appearancePage(content: LinearLayout, sheet: com.google.android.material.bottomsheet.BottomSheetDialog) {
         content.addView(label("Яркость", 14f, R.attr.gTextSecondary, true).apply { setPadding(dp(4), dp(8), 0, dp(8)) })
-        val modes = listOf("auto" to "Как в системе", "light" to "День", "dark" to "Ночь")
+        val modes = listOf("light" to "День", "dim" to "Вечер", "dark" to "Ночь")
         val g = com.google.android.material.button.MaterialButtonToggleGroup(this).apply { isSingleSelection = true; isSelectionRequired = true }
         val mids = modes.map { View.generateViewId() }
         modes.forEachIndexed { i, m ->
@@ -913,6 +1010,7 @@ class MainActivity : AppCompatActivity() {
         content.addView(g, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
         val cur = COLOR_THEMES.first { it.id == colorTheme() }
+        content.addView(opacityControl())
         content.addView(label("Цветовая тема: ${cur.title}", 14f, R.attr.gTextSecondary, true).apply { setPadding(dp(4), dp(24), 0, dp(12)) })
         for (group in COLOR_THEMES.chunked(4)) {
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; clipChildren = false }
@@ -962,7 +1060,7 @@ class MainActivity : AppCompatActivity() {
                 gravity = Gravity.CENTER_VERTICAL
                 minimumHeight = dp(44)
                 setPadding(dp(14), 0, dp(14), dp(3))
-                background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_chip)
+                background = Skin.chip(this@MainActivity, uiOpacity())
                 isSelected = on
                 elevation = dp(3).toFloat()
                 stateListAnimator = android.animation.AnimatorInflater.loadStateListAnimator(this@MainActivity, R.animator.press)
@@ -1087,8 +1185,10 @@ class MainActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams(0, dp(48), 1f).apply { if (i < items.size - 1) marginEnd = dp(8) })
         }
         root.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
+        root.addView(dragHandle(), 0)
         sheet.setContentView(root)
-        sheet.window?.setDimAmount(0.15f)
+        styleSheet(sheet)
+        sheet.window?.setDimAmount(0.3f)
         sheet.show()
     }
 
@@ -1415,7 +1515,7 @@ class MainActivity : AppCompatActivity() {
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
     companion object {
-        private val DATA_FILES = listOf("map.mbtiles", "relief.mbtiles", "places.db", "graph.bin")
+        private val DATA_FILES = listOf("map.mbtiles", "relief.mbtiles", "places.db", "graph.bin", "sat.mbtiles")
         // transport POIs have their own always-visible layers (tr-*, lbl-station ...); keep them out of the generic POI layers
         private const val TR_LIST = "'station','halt','subway','tram_stop','bus_station','bus_stop','ferry_terminal','harbor'"
         private const val TRANSPORT_EXPR = "['any',['match',['get','class'],[$TR_LIST],true,false]," +

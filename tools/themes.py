@@ -100,9 +100,39 @@ THEMES = {
 }
 
 
+def mix(a, b, t):
+    """a moved towards b by t (0..1); both '#RRGGBB'"""
+    x, y = hex2rgb(a), hex2rgb(b)
+    return "#%02X%02X%02X" % tuple(round(x[i] + (y[i] - x[i]) * t) for i in range(3))
+
+
+def dim_palette(t):
+    """"Evening": the night palette with lifted surfaces - a soft grey-tinted middle between day and night."""
+    d, l = t["dark"], t["light"]
+    p = dict(d)
+    for k in ("surface", "panel", "dialog"):
+        p[k] = mix(d[k], l[k], .22)
+    # text has to be brighter than at night, otherwise it loses contrast on the lifted surfaces
+    p["text"] = mix(d["text"], "#FFFFFF", .85)
+    p["text2"] = mix(d["text2"], "#FFFFFF", .60)
+    p["hint"] = mix(d["hint"], "#FFFFFF", .45)
+    p["icon"] = mix(d["icon"], "#FFFFFF", .6)
+    p["container"] = d["container"]
+    p["on_container"] = mix(d["on_container"], "#FFFFFF", .6)
+    return p
+
+
+# colours of the stylised satellite map (not a user-selectable theme)
+SAT_MAP = dict(nh=100, ns=.10, nsd=.10, gh=108, gs=2.4, wh=205, ws=2.2, os=1.35, ph=30, k=1.0)
+
+
 def hex2rgb(h):
     h = h.lstrip("#")
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+for _t in THEMES.values():
+    _t["dim"] = dim_palette(_t)
 
 
 def lum(h):
@@ -123,7 +153,7 @@ def contrast(a, b):
 def check():
     bad = []
     for name, t in THEMES.items():
-        for mode in ("light", "dark"):
+        for mode in ("light", "dark", "dim"):
             p = t[mode]
             rules = [("text/surface", p["text"], p["surface"], 7), ("text/panel", p["text"], p["panel"], 7),
                      ("text/dialog", p["text"], p["dialog"], 7), ("text2/surface", p["text2"], p["surface"], 4.5),
@@ -146,7 +176,7 @@ def _parse(color):
     return int(inner[0]), int(inner[1]), int(inner[2]), float(inner[3])
 
 
-def map_color(color, m, dark):
+def map_color(color, m, dark, mode=None, darken=False):
     """Re-tints one base colour of the style for a theme: neutrals take the theme tint, greens / blues /
     purples move to the theme's hues, saturation is scaled. Lightness is kept, so contrast stays intact."""
     r, g, b, a = _parse(color)
@@ -168,6 +198,12 @@ def map_color(color, m, dark):
     k = m.get("k", 1.0)                                     # optional contrast stretch around mid-grey
     if k != 1.0:
         l = max(0.0, min(1.0, .5 + (l - .5) * k))
+    if mode == "dim":                                       # evening: night colours lifted towards the middle
+        l = .12 + .76 * l
+    elif mode == "sat":                                     # satellite look: natural mid-dark tones
+        l = .10 + .72 * l
+    if darken:
+        l *= .72
     r2, g2, b2 = colorsys.hls_to_rgb((h2 % 360) / 360, l, max(0, min(1, s2)))
     R, G, B = (int(round(v * 255)) for v in (r2, g2, b2))
     if a is None:

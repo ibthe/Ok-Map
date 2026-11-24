@@ -100,23 +100,44 @@ class Compass(
             if (placeLat.isNaN()) Toast.makeText(act, "Найдите место в поиске или нажмите на карту и выберите «Компас»", Toast.LENGTH_LONG).show()
             else select(Kind.PLACE)
         }
-        cal.setOnClickListener {
-            com.google.android.material.dialog.MaterialAlertDialogBuilder(act)
-                .setTitle("Калибровка компаса")
-                .setMessage("Компас работает по магнитному полю Земли, поэтому его сбивают металл, магниты, автомобильные " +
-                    "держатели, чехлы с магнитом, провода и корпус машины.\n\n" +
-                    "1. Отойдите от металла и электроники.\n" +
-                    "2. Плавно нарисуйте телефоном в воздухе цифру 8, поворачивая кисть в разные стороны, 5–10 раз.\n" +
-                    "3. Медленно поверните телефон вокруг каждой из осей.\n\n" +
-                    "Если точность осталась низкой, повторите вдали от машин и зданий. Держите телефон ровно или вертикально, " +
-                    "не под углом около 45°.")
-                .setPositiveButton("Понятно", null).show()
-        }
+        cal.setOnClickListener { showCalibration(false) }
         btnMap.setOnClickListener {
             prefs.edit().putBoolean("compass_map", !prefs.getBoolean("compass_map", false)).apply()
             if (!prefs.getBoolean("compass_map", false)) resetMapRotation()
             refreshUi()
         }
+    }
+
+    // ------------------------------------------------------------------ calibration help + reminders
+    private var dialogShown = false
+    private var lowSince = 0L
+
+    fun showCalibration(reminder: Boolean) {
+        if (dialogShown) return
+        dialogShown = true
+        prefs.edit().putLong("compass_cal_last", System.currentTimeMillis()).apply()
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(act)
+            .setTitle(if (reminder) "Компасу нужна калибровка" else "Калибровка компаса")
+            .setMessage((if (reminder) "Датчик сообщает, что его показания сейчас неточны.\n\n" else "") +
+                "Компас работает по магнитному полю Земли, поэтому его сбивают металл, магниты, автомобильные " +
+                "держатели, чехлы с магнитом, провода и корпус машины.\n\n" +
+                "1. Отойдите от металла и электроники.\n" +
+                "2. Плавно нарисуйте телефоном в воздухе цифру 8, поворачивая кисть в разные стороны, 5–10 раз.\n" +
+                "3. Медленно поверните телефон вокруг каждой из осей.\n\n" +
+                "Держите телефон ровно или вертикально, не под углом около 45°.")
+            .setPositiveButton("Понятно", null)
+            .setOnDismissListener { dialogShown = false }
+            .show()
+    }
+
+    /** Called with every accuracy change and sensor sample: asks for calibration when the sensor stays unreliable. */
+    private fun remindIfNeeded() {
+        val now = System.currentTimeMillis()
+        val bad = accuracy <= SensorManager.SENSOR_STATUS_ACCURACY_LOW
+        if (!bad) { lowSince = 0L; return }
+        if (lowSince == 0L) { lowSince = now; return }
+        val last = prefs.getLong("compass_cal_last", 0L)
+        if (now - lowSince > 3000 && now - last > 10 * 60 * 1000L) showCalibration(true)
     }
 
     // ------------------------------------------------------------------ open / close
@@ -129,6 +150,11 @@ class Compass(
             return
         }
         isOpen = true
+        lowSince = 0L
+        if (!prefs.getBoolean("compass_tip", false)) {
+            prefs.edit().putBoolean("compass_tip", true).apply()
+            Toast.makeText(act, "Для точности откалибруйте компас: покрутите телефон «восьмёркой»", Toast.LENGTH_LONG).show()
+        }
         first = true
         panel.visibility = View.VISIBLE
         updatePosition(position())
@@ -187,12 +213,14 @@ class Compass(
 
     override fun onAccuracyChanged(sensor: Sensor?, acc: Int) {
         accuracy = acc
+        remindIfNeeded()
         refreshUi()
     }
 
     @Suppress("DEPRECATION")
     override fun onSensorChanged(e: SensorEvent) {
         if (e.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) checkInterference(e.values)
+        if (isOpen) remindIfNeeded()
         val ok: Boolean
         when (e.sensor.type) {
             Sensor.TYPE_ROTATION_VECTOR -> { SensorManager.getRotationMatrixFromVector(rm, e.values); ok = true }

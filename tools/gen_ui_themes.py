@@ -14,7 +14,7 @@ if bad:
 RES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app", "src", "main", "res")
 ATTRS = ["gSurface", "gPanel", "gStroke", "gFab", "gDialog", "gTextPrimary", "gTextSecondary", "gHint", "gIcon",
          "gAccent", "gOnAccent", "gAccentContainer", "gOnAccentContainer", "gCrosshair", "gCrosshairHalo",
-         "gRaisedTop", "gRaisedBottom", "gRaisedEdge", "gAccentTop", "gAccentBottom", "gAccentEdge"]
+         "gRaisedTop", "gRaisedBottom", "gRaisedEdge", "gAccentTop", "gAccentBottom", "gAccentEdge", "gRim"]
 CAP = {"forest": "Forest", "ocean": "Ocean", "sand": "Sand", "dusk": "Dusk", "graphite": "Graphite", "sunset": "Sunset", "mint": "Mint", "contrast": "Contrast"}
 
 
@@ -29,16 +29,14 @@ def a(alpha, h):
     return "#%02X%s" % (alpha, h.lstrip("#").upper())
 
 
-def mix(a, b, t):
-    """a moved towards b by t (0..1); both '#RRGGBB'"""
-    x, y = T.hex2rgb(a), T.hex2rgb(b)
-    return "#%02X%02X%02X" % tuple(round(x[i] + (y[i] - x[i]) * t) for i in range(3))
+mix = T.mix
 
 
 def values(p, dark):
-    stroke = a(0x24, "#FFFFFF") if dark else a(0x1A, p["text"])
+    stroke = a(0x3D, "#FFFFFF") if dark else a(0x33, p["text"])
+    rim = a(0x70, "#FFFFFF") if dark else a(0x66, p["text"])      # outline of panels and keys: stays opaque when panels are made transparent
     return {
-        "gSurface": p["surface"].upper(), "gPanel": a(0xEB, p["panel"]), "gStroke": stroke,
+        "gRim": rim, "gSurface": p["surface"].upper(), "gPanel": a(0xEB, p["panel"]), "gStroke": stroke,
         "gFab": a(0xF5, p["panel"]), "gDialog": p["dialog"].upper(), "gTextPrimary": p["text"].upper(),
         "gTextSecondary": p["text2"].upper(), "gHint": p["hint"].upper(), "gIcon": p["icon"].upper(),
         "gAccent": p["accent"].upper(), "gOnAccent": p["on_accent"].upper(),
@@ -46,7 +44,7 @@ def values(p, dark):
         # soft-3D "key" buttons: lit top, shaded bottom, darker rim that reads as the key's thickness
         "gRaisedTop": a(0xFA, mix(p["panel"], "#FFFFFF", .10 if dark else .65)),
         "gRaisedBottom": a(0xFA, mix(p["panel"], "#000000", .22 if dark else .07)),
-        "gRaisedEdge": mix(p["panel"], "#000000", .55 if dark else .22),
+        "gRaisedEdge": mix(p["panel"], "#000000", .60 if dark else .34),
         "gAccentTop": mix(p["accent"], "#FFFFFF", .10 if dark else .18),
         "gAccentBottom": mix(p["accent"], "#000000", .14),
         "gAccentEdge": mix(p["accent"], "#000000", .38 if dark else .34),
@@ -54,11 +52,13 @@ def values(p, dark):
     }
 
 
-def style(name, mode_dark):
-    p = T.THEMES[name]["dark" if mode_dark else "light"]
+def style(name, mode):
+    """mode: "light" | "dark" (values-night) | "dim" (evening, a regular style with the dark palette lifted)"""
+    mode_dark = mode != "light"
+    p = T.THEMES[name][mode]
     v = values(p, mode_dark)
     items = "\n".join(f'        <item name="{k}">{val}</item>' for k, val in v.items())
-    return f'''    <style name="Theme.OkMap.{CAP[name]}" parent="Base.Theme.OkMap">
+    return f'''    <style name="Theme.OkMap.{CAP[name]}{"_Dim" if mode == "dim" else ""}" parent="Base.Theme.OkMap">
 {items}
         <item name="colorPrimary">{v["gAccent"]}</item>
         <item name="colorOnPrimary">{v["gOnAccent"]}</item>
@@ -75,8 +75,8 @@ def style(name, mode_dark):
         <item name="android:statusBarColor">{v["gSurface"]}</item>
         <item name="android:navigationBarColor">{v["gSurface"]}</item>
         <item name="android:windowBackground">{v["gSurface"]}</item>
-        <item name="android:windowLightStatusBar">@bool/light_bars</item>
-        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
+        <item name="android:windowLightStatusBar">{"@bool/light_bars" if mode == "light" else "false"}</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">{"@bool/light_bars" if mode == "light" else "false"}</item>
     </style>
 '''
 
@@ -175,10 +175,10 @@ base = '''    <!-- type scale (sp): 12 caption / 14 label / 16 body / 20 title; 
     </style>
 '''
 w("values/themes.xml", '<?xml version="1.0" encoding="utf-8"?>\n<resources xmlns:tools="http://schemas.android.com/tools">\n' + base + "\n" +
-  "".join(style(n, False) for n in T.ORDER) +
+  "".join(style(n, "light") for n in T.ORDER) + "".join(style(n, "dim") for n in T.ORDER) +
   '    <!-- default (manifest) theme -->\n    <style name="Theme.OkMap" parent="Theme.OkMap.Forest" />\n</resources>\n')
 w("values-night/themes.xml", '<?xml version="1.0" encoding="utf-8"?>\n<resources xmlns:tools="http://schemas.android.com/tools">\n' +
-  "".join(style(n, True) for n in T.ORDER) + "</resources>\n")
+  "".join(style(n, "dark") for n in T.ORDER) + "</resources>\n")
 
 for f in ("values/colors.xml", "values-night/colors.xml", "values-v27/themes.xml", "values-v27/nav.xml"):
     p = os.path.join(RES, f)

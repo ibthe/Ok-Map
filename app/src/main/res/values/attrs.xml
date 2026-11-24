@@ -21,4 +21,5 @@
     <attr name="gAccentTop" format="color" />
     <attr name="gAccentBottom" format="color" />
     <attr name="gAccentEdge" format="color" />
+    <attr name="gRim" format="color" />
 </resources>

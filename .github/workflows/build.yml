@@ -9,6 +9,10 @@ on:
         description: "Optional: direct link to a .osm.pbf of Georgia (country) if automatic download fails"
         required: false
         default: ""
+      sat_url:
+        description: "Optional: direct URL of a raster satellite imagery .mbtiles (leave empty for the stylised satellite view)"
+        required: false
+        default: ""
 
 jobs:
   build:
@@ -131,15 +135,27 @@ jobs:
           rm -rf app/src/main/assets/glyphs
           python tools/build_glyphs.py app/src/main/assets/glyphs/NotoSans
 
-      - name: Generate map styles (all colour themes x day/night)
+      - name: Generate map styles (all colour themes x day / evening / night, plus satellite)
         run: |
           rm -f app/src/main/assets/style*.json
           for t in $(python tools/themes.py --list); do
             python tools/gen_style.py app/src/main/assets/style_$t.json --theme $t
+            python tools/gen_style.py app/src/main/assets/style_${t}_dim.json --dim --theme $t
             python tools/gen_style.py app/src/main/assets/style_${t}_dark.json --dark --theme $t
           done
+          python tools/gen_style.py app/src/main/assets/style_sat.json --sat
+          python tools/gen_style.py app/src/main/assets/style_sat_dark.json --sat --dark
           python tools/themes.py
-          ls -l app/src/main/assets/style_*.json
+          python tools/test_compass.py
+          ls -l app/src/main/assets/style_*.json | wc -l
+
+      # Optional real satellite imagery: a raster MBTiles (png/jpg tiles, XYZ) of your region from a source you may use
+      - name: Download satellite imagery (optional)
+        if: inputs.sat_url != ''
+        continue-on-error: true
+        run: |
+          curl -L --fail -o app/src/main/assets/sat.mbtiles "${{ inputs.sat_url }}"
+          ls -lh app/src/main/assets/sat.mbtiles
 
       - uses: gradle/actions/setup-gradle@v4
         with:

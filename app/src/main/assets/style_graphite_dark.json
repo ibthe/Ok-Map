@@ -517,7 +517,34 @@
    ],
    "minzoom": 13,
    "paint": {
-    "fill-color": "#242425"
+    "fill-color": "#232221"
+   }
+  },
+  {
+   "id": "landuse-station-outline",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "landuse",
+   "filter": [
+    "match",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "bus_station"
+    ],
+    true,
+    false
+   ],
+   "minzoom": 13,
+   "paint": {
+    "line-color": "#a9a39c",
+    "line-width": 1.4,
+    "line-dasharray": [
+     3,
+     2
+    ]
    }
   },
   {
@@ -747,9 +774,50 @@
     ],
     "Polygon"
    ],
-   "minzoom": 11,
+   "minzoom": 9,
    "paint": {
-    "fill-color": "#232324"
+    "fill-color": "#29292b",
+    "fill-opacity": 0.85
+   }
+  },
+  {
+   "id": "aeroway-outline",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "aeroway",
+   "filter": [
+    "==",
+    [
+     "geometry-type"
+    ],
+    "Polygon"
+   ],
+   "minzoom": 9,
+   "layout": {
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#b6b8bb",
+    "line-width": [
+     "interpolate",
+     [
+      "exponential",
+      1.4
+     ],
+     [
+      "zoom"
+     ],
+     9,
+     1.0,
+     13,
+     1.8,
+     16,
+     2.6
+    ],
+    "line-dasharray": [
+     3,
+     2
+    ]
    }
   },
   {
@@ -3243,8 +3311,8 @@
   },
   {
    "id": "tr-stop-dot",
-   "type": "circle",
-   "source": "openmaptiles",
+   "type": "symbol",
+   "source": "openmaptiles-labels",
    "source-layer": "poi",
    "filter": [
     "any",
@@ -3276,17 +3344,31 @@
     ]
    ],
    "minzoom": 15,
-   "paint": {
-    "circle-radius": 2.6,
-    "circle-color": "#a9a39c",
-    "circle-stroke-width": 0.8,
-    "circle-stroke-color": "#181819"
+   "layout": {
+    "icon-image": "ic-stop",
+    "icon-size": [
+     "interpolate",
+     [
+      "exponential",
+      1.4
+     ],
+     [
+      "zoom"
+     ],
+     15,
+     0.5,
+     18,
+     0.75
+    ],
+    "icon-allow-overlap": true,
+    "icon-ignore-placement": true,
+    "icon-anchor": "center"
    }
   },
   {
    "id": "tr-bus-dot",
-   "type": "circle",
-   "source": "openmaptiles",
+   "type": "symbol",
+   "source": "openmaptiles-labels",
    "source-layer": "poi",
    "filter": [
     "any",
@@ -3316,8 +3398,9 @@
     ]
    ],
    "minzoom": 12,
-   "paint": {
-    "circle-radius": [
+   "layout": {
+    "icon-image": "ic-bus",
+    "icon-size": [
      "interpolate",
      [
       "exponential",
@@ -3327,19 +3410,19 @@
       "zoom"
      ],
      12,
-     3.5,
+     0.6,
      16,
-     5.5
+     0.95
     ],
-    "circle-color": "#a9a39c",
-    "circle-stroke-width": 1.2,
-    "circle-stroke-color": "#181819"
+    "icon-allow-overlap": true,
+    "icon-ignore-placement": true,
+    "icon-anchor": "center"
    }
   },
   {
    "id": "tr-ferry-dot",
-   "type": "circle",
-   "source": "openmaptiles",
+   "type": "symbol",
+   "source": "openmaptiles-labels",
    "source-layer": "poi",
    "filter": [
     "any",
@@ -3371,8 +3454,9 @@
     ]
    ],
    "minzoom": 11,
-   "paint": {
-    "circle-radius": [
+   "layout": {
+    "icon-image": "ic-ferry",
+    "icon-size": [
      "interpolate",
      [
       "exponential",
@@ -3382,19 +3466,19 @@
       "zoom"
      ],
      11,
-     3.5,
+     0.6,
      16,
-     5.5
+     0.95
     ],
-    "circle-color": "#828e88",
-    "circle-stroke-width": 1.2,
-    "circle-stroke-color": "#181819"
+    "icon-allow-overlap": true,
+    "icon-ignore-placement": true,
+    "icon-anchor": "center"
    }
   },
   {
    "id": "tr-station-dot",
-   "type": "circle",
-   "source": "openmaptiles",
+   "type": "symbol",
+   "source": "openmaptiles-labels",
    "source-layer": "poi",
    "filter": [
     "any",
@@ -3428,8 +3512,9 @@
     ]
    ],
    "minzoom": 10,
-   "paint": {
-    "circle-radius": [
+   "layout": {
+    "icon-image": "ic-train",
+    "icon-size": [
      "interpolate",
      [
       "exponential",
@@ -3439,21 +3524,21 @@
       "zoom"
      ],
      10,
-     3,
+     0.55,
      14,
-     4.5,
+     0.8,
      17,
-     6.5
+     1.05
     ],
-    "circle-color": "#9ea6b2",
-    "circle-stroke-width": 1.4,
-    "circle-stroke-color": "#181819"
+    "icon-allow-overlap": true,
+    "icon-ignore-placement": true,
+    "icon-anchor": "center"
    }
   },
   {
    "id": "tr-aerodrome-dot",
-   "type": "circle",
-   "source": "openmaptiles",
+   "type": "symbol",
+   "source": "openmaptiles-labels",
    "source-layer": "aerodrome_label",
    "filter": [
     "!=",
@@ -3464,8 +3549,9 @@
     "private"
    ],
    "minzoom": 7,
-   "paint": {
-    "circle-radius": [
+   "layout": {
+    "icon-image": "ic-plane",
+    "icon-size": [
      "interpolate",
      [
       "exponential",
@@ -3475,13 +3561,13 @@
       "zoom"
      ],
      7,
-     3.5,
+     0.6,
      12,
-     6
+     0.95
     ],
-    "circle-color": "#b6b8bb",
-    "circle-stroke-width": 1.4,
-    "circle-stroke-color": "#181819"
+    "icon-allow-overlap": true,
+    "icon-ignore-placement": true,
+    "icon-anchor": "center"
    }
   },
   {

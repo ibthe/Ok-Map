@@ -73,9 +73,10 @@
     </style>
 
     <style name="Theme.OkMap.Forest" parent="Base.Theme.OkMap">
+        <item name="gRim">#661B2A22</item>
         <item name="gSurface">#F3F5F0</item>
         <item name="gPanel">#EBF9FBF6</item>
-        <item name="gStroke">#1A1B2A22</item>
+        <item name="gStroke">#331B2A22</item>
         <item name="gFab">#F5F9FBF6</item>
         <item name="gDialog">#FBFCF8</item>
         <item name="gTextPrimary">#1B2A22</item>
@@ -88,7 +89,7 @@
         <item name="gOnAccentContainer">#0E3A26</item>
         <item name="gRaisedTop">#FAFDFEFC</item>
         <item name="gRaisedBottom">#FAE8E9E5</item>
-        <item name="gRaisedEdge">#C2C4C0</item>
+        <item name="gRaisedEdge">#A4A6A2</item>
         <item name="gAccentTop">#508E72</item>
         <item name="gAccentBottom">#246547</item>
         <item name="gAccentEdge">#1C4D37</item>
@@ -113,9 +114,10 @@
         <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
     </style>
     <style name="Theme.OkMap.Ocean" parent="Base.Theme.OkMap">
+        <item name="gRim">#6614222E</item>
         <item name="gSurface">#F1F5F8</item>
         <item name="gPanel">#EBF8FBFD</item>
-        <item name="gStroke">#1A14222E</item>
+        <item name="gStroke">#3314222E</item>
         <item name="gFab">#F5F8FBFD</item>
         <item name="gDialog">#FBFDFE</item>
         <item name="gTextPrimary">#14222E</item>
@@ -128,7 +130,7 @@
         <item name="gOnAccentContainer">#0A3550</item>
         <item name="gRaisedTop">#FAFDFEFE</item>
         <item name="gRaisedBottom">#FAE7E9EB</item>
-        <item name="gRaisedEdge">#C1C4C5</item>
+        <item name="gRaisedEdge">#A4A6A7</item>
         <item name="gAccentTop">#4785AB</item>
         <item name="gAccentBottom">#1B5B83</item>
         <item name="gAccentEdge">#144664</item>
@@ -153,9 +155,10 @@
         <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
     </style>
     <style name="Theme.OkMap.Sand" parent="Base.Theme.OkMap">
+        <item name="gRim">#662A2118</item>
         <item name="gSurface">#F6F2EA</item>
         <item name="gPanel">#EBFBF8F2</item>
-        <item name="gStroke">#1A2A2118</item>
+        <item name="gStroke">#332A2118</item>
         <item name="gFab">#F5FBF8F2</item>
         <item name="gDialog">#FDFBF6</item>
         <item name="gTextPrimary">#2A2118</item>
@@ -168,7 +171,7 @@
         <item name="gOnAccentContainer">#4A1C0A</item>
         <item name="gRaisedTop">#FAFEFDFA</item>
         <item name="gRaisedBottom">#FAE9E7E1</item>
-        <item name="gRaisedEdge">#C4C1BD</item>
+        <item name="gRaisedEdge">#A6A4A0</item>
         <item name="gAccentTop">#B86D50</item>
         <item name="gAccentBottom">#904223</item>
         <item name="gAccentEdge">#6F331B</item>
@@ -193,9 +196,10 @@
         <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
     </style>
     <style name="Theme.OkMap.Dusk" parent="Base.Theme.OkMap">
+        <item name="gRim">#661E1A2B</item>
         <item name="gSurface">#F4F2F8</item>
         <item name="gPanel">#EBFAF9FD</item>
-        <item name="gStroke">#1A1E1A2B</item>
+        <item name="gStroke">#331E1A2B</item>
         <item name="gFab">#F5FAF9FD</item>
         <item name="gDialog">#FCFBFE</item>
         <item name="gTextPrimary">#1E1A2B</item>
@@ -208,7 +212,7 @@
         <item name="gOnAccentContainer">#261A5C</item>
         <item name="gRaisedTop">#FAFDFDFE</item>
         <item name="gRaisedBottom">#FAE8E8EB</item>
-        <item name="gRaisedEdge">#C3C2C5</item>
+        <item name="gRaisedEdge">#A5A4A7</item>
         <item name="gAccentTop">#8070BD</item>
         <item name="gAccentBottom">#564596</item>
         <item name="gAccentEdge">#423573</item>
@@ -233,9 +237,10 @@
         <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
     </style>
     <style name="Theme.OkMap.Graphite" parent="Base.Theme.OkMap">
+        <item name="gRim">#6617181A</item>
         <item name="gSurface">#F1F1F1</item>
         <item name="gPanel">#EBFAFAFA</item>
-        <item name="gStroke">#1A17181A</item>
+        <item name="gStroke">#3317181A</item>
         <item name="gFab">#F5FAFAFA</item>
         <item name="gDialog">#FCFCFC</item>
         <item name="gTextPrimary">#17181A</item>
@@ -248,7 +253,7 @@
         <item name="gOnAccentContainer">#1B1C1F</item>
         <item name="gRaisedTop">#FAFDFDFD</item>
         <item name="gRaisedBottom">#FAE8E8E8</item>
-        <item name="gRaisedEdge">#C3C3C3</item>
+        <item name="gRaisedEdge">#A5A5A5</item>
         <item name="gAccentTop">#4C4E51</item>
         <item name="gAccentBottom">#202225</item>
         <item name="gAccentEdge">#181A1C</item>
@@ -273,9 +278,10 @@
         <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
     </style>
     <style name="Theme.OkMap.Sunset" parent="Base.Theme.OkMap">
+        <item name="gRim">#662C1A1F</item>
         <item name="gSurface">#F8F1F2</item>
         <item name="gPanel">#EBFDF8F9</item>
-        <item name="gStroke">#1A2C1A1F</item>
+        <item name="gStroke">#332C1A1F</item>
         <item name="gFab">#F5FDF8F9</item>
         <item name="gDialog">#FEFAFA</item>
         <item name="gTextPrimary">#2C1A1F</item>
@@ -288,7 +294,7 @@
         <item name="gOnAccentContainer">#4E0E24</item>
         <item name="gRaisedTop">#FAFEFDFD</item>
         <item name="gRaisedBottom">#FAEBE7E8</item>
-        <item name="gRaisedEdge">#C5C1C2</item>
+        <item name="gRaisedEdge">#A7A4A4</item>
         <item name="gAccentTop">#C05D7B</item>
         <item name="gAccentBottom">#993251</item>
         <item name="gAccentEdge">#75263E</item>
@@ -313,9 +319,10 @@
         <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
     </style>
     <style name="Theme.OkMap.Mint" parent="Base.Theme.OkMap">
+        <item name="gRim">#66112624</item>
         <item name="gSurface">#EFF6F5</item>
         <item name="gPanel">#EBF7FBFA</item>
-        <item name="gStroke">#1A112624</item>
+        <item name="gStroke">#33112624</item>
         <item name="gFab">#F5F7FBFA</item>
         <item name="gDialog">#FAFDFC</item>
         <item name="gTextPrimary">#112624</item>
@@ -328,7 +335,7 @@
         <item name="gOnAccentContainer">#053B3D</item>
         <item name="gRaisedTop">#FAFCFEFD</item>
         <item name="gRaisedBottom">#FAE6E9E8</item>
-        <item name="gRaisedEdge">#C1C4C3</item>
+        <item name="gRaisedEdge">#A3A6A5</item>
         <item name="gAccentTop">#369496</item>
         <item name="gAccentBottom">#096B6D</item>
         <item name="gAccentEdge">#075254</item>
@@ -353,9 +360,10 @@
         <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
     </style>
     <style name="Theme.OkMap.Contrast" parent="Base.Theme.OkMap">
+        <item name="gRim">#66000000</item>
         <item name="gSurface">#FAFAFA</item>
         <item name="gPanel">#EBFFFFFF</item>
-        <item name="gStroke">#1A000000</item>
+        <item name="gStroke">#33000000</item>
         <item name="gFab">#F5FFFFFF</item>
         <item name="gDialog">#FFFFFF</item>
         <item name="gTextPrimary">#000000</item>
@@ -368,7 +376,7 @@
         <item name="gOnAccentContainer">#00123D</item>
         <item name="gRaisedTop">#FAFFFFFF</item>
         <item name="gRaisedBottom">#FAEDEDED</item>
-        <item name="gRaisedEdge">#C7C7C7</item>
+        <item name="gRaisedEdge">#A8A8A8</item>
         <item name="gAccentTop">#3762CB</item>
         <item name="gAccentBottom">#0936A4</item>
         <item name="gAccentEdge">#072A7E</item>
@@ -391,6 +399,334 @@
         <item name="android:windowBackground">#FAFAFA</item>
         <item name="android:windowLightStatusBar">@bool/light_bars</item>
         <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
+    </style>
+    <style name="Theme.OkMap.Forest_Dim" parent="Base.Theme.OkMap">
+        <item name="gRim">#70FFFFFF</item>
+        <item name="gSurface">#414643</item>
+        <item name="gPanel">#EB474E4A</item>
+        <item name="gStroke">#3DFFFFFF</item>
+        <item name="gFab">#F5474E4A</item>
+        <item name="gDialog">#4C5450</item>
+        <item name="gTextPrimary">#FBFCFB</item>
+        <item name="gTextSecondary">#DAE1DD</item>
+        <item name="gHint">#B3BCB6</item>
+        <item name="gIcon">#EFF5F1</item>
+        <item name="gAccent">#7FD1A8</item>
+        <item name="gOnAccent">#06281A</item>
+        <item name="gAccentContainer">#1F4A37</item>
+        <item name="gOnAccentContainer">#EFF7F1</item>
+        <item name="gRaisedTop">#FA59605C</item>
+        <item name="gRaisedBottom">#FA373D3A</item>
+        <item name="gRaisedEdge">#1C1F1E</item>
+        <item name="gAccentTop">#8CD6B1</item>
+        <item name="gAccentBottom">#6DB490</item>
+        <item name="gAccentEdge">#4F8268</item>
+        <item name="gCrosshair">#FF7088</item>
+        <item name="gCrosshairHalo">#CC414643</item>
+        <item name="colorPrimary">#7FD1A8</item>
+        <item name="colorOnPrimary">#06281A</item>
+        <item name="colorPrimaryContainer">#1F4A37</item>
+        <item name="colorOnPrimaryContainer">#EFF7F1</item>
+        <item name="colorSecondaryContainer">#1F4A37</item>
+        <item name="colorOnSecondaryContainer">#EFF7F1</item>
+        <item name="colorSurface">#414643</item>
+        <item name="colorOnSurface">#FBFCFB</item>
+        <item name="colorOnSurfaceVariant">#DAE1DD</item>
+        <item name="colorSurfaceContainer">#4C5450</item>
+        <item name="colorSurfaceContainerHigh">#4C5450</item>
+        <item name="colorOutline">#B3BCB6</item>
+        <item name="android:statusBarColor">#414643</item>
+        <item name="android:navigationBarColor">#414643</item>
+        <item name="android:windowBackground">#414643</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
+    </style>
+    <style name="Theme.OkMap.Ocean_Dim" parent="Base.Theme.OkMap">
+        <item name="gRim">#70FFFFFF</item>
+        <item name="gSurface">#3F464B</item>
+        <item name="gPanel">#EB454D54</item>
+        <item name="gStroke">#3DFFFFFF</item>
+        <item name="gFab">#F5454D54</item>
+        <item name="gDialog">#4B535B</item>
+        <item name="gTextPrimary">#FAFCFD</item>
+        <item name="gTextSecondary">#D9E0E7</item>
+        <item name="gHint">#B1BCC7</item>
+        <item name="gIcon">#EEF4F8</item>
+        <item name="gAccent">#7CC0EA</item>
+        <item name="gOnAccent">#052A42</item>
+        <item name="gAccentContainer">#1B4B69</item>
+        <item name="gOnAccentContainer">#EDF6FB</item>
+        <item name="gRaisedTop">#FA585F65</item>
+        <item name="gRaisedBottom">#FA363C42</item>
+        <item name="gRaisedEdge">#1C1F22</item>
+        <item name="gAccentTop">#89C6EC</item>
+        <item name="gAccentBottom">#6BA5C9</item>
+        <item name="gAccentEdge">#4D7791</item>
+        <item name="gCrosshair">#FF7088</item>
+        <item name="gCrosshairHalo">#CC3F464B</item>
+        <item name="colorPrimary">#7CC0EA</item>
+        <item name="colorOnPrimary">#052A42</item>
+        <item name="colorPrimaryContainer">#1B4B69</item>
+        <item name="colorOnPrimaryContainer">#EDF6FB</item>
+        <item name="colorSecondaryContainer">#1B4B69</item>
+        <item name="colorOnSecondaryContainer">#EDF6FB</item>
+        <item name="colorSurface">#3F464B</item>
+        <item name="colorOnSurface">#FAFCFD</item>
+        <item name="colorOnSurfaceVariant">#D9E0E7</item>
+        <item name="colorSurfaceContainer">#4B535B</item>
+        <item name="colorSurfaceContainerHigh">#4B535B</item>
+        <item name="colorOutline">#B1BCC7</item>
+        <item name="android:statusBarColor">#3F464B</item>
+        <item name="android:navigationBarColor">#3F464B</item>
+        <item name="android:windowBackground">#3F464B</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
+    </style>
+    <style name="Theme.OkMap.Sand_Dim" parent="Base.Theme.OkMap">
+        <item name="gRim">#70FFFFFF</item>
+        <item name="gSurface">#434549</item>
+        <item name="gPanel">#EB4A4C52</item>
+        <item name="gStroke">#3DFFFFFF</item>
+        <item name="gFab">#F54A4C52</item>
+        <item name="gDialog">#50535A</item>
+        <item name="gTextPrimary">#FCFCFA</item>
+        <item name="gTextSecondary">#E5E1DB</item>
+        <item name="gHint">#BFBCB4</item>
+        <item name="gIcon">#F6F3EC</item>
+        <item name="gAccent">#E8B96A</item>
+        <item name="gOnAccent">#2E1F00</item>
+        <item name="gAccentContainer">#5B4518</item>
+        <item name="gOnAccentContainer">#FBF4E5</item>
+        <item name="gRaisedTop">#FA5C5E63</item>
+        <item name="gRaisedBottom">#FA3A3B40</item>
+        <item name="gRaisedEdge">#1E1E21</item>
+        <item name="gAccentTop">#EAC079</item>
+        <item name="gAccentBottom">#C89F5B</item>
+        <item name="gAccentEdge">#907342</item>
+        <item name="gCrosshair">#FF8070</item>
+        <item name="gCrosshairHalo">#CC434549</item>
+        <item name="colorPrimary">#E8B96A</item>
+        <item name="colorOnPrimary">#2E1F00</item>
+        <item name="colorPrimaryContainer">#5B4518</item>
+        <item name="colorOnPrimaryContainer">#FBF4E5</item>
+        <item name="colorSecondaryContainer">#5B4518</item>
+        <item name="colorOnSecondaryContainer">#FBF4E5</item>
+        <item name="colorSurface">#434549</item>
+        <item name="colorOnSurface">#FCFCFA</item>
+        <item name="colorOnSurfaceVariant">#E5E1DB</item>
+        <item name="colorSurfaceContainer">#50535A</item>
+        <item name="colorSurfaceContainerHigh">#50535A</item>
+        <item name="colorOutline">#BFBCB4</item>
+        <item name="android:statusBarColor">#434549</item>
+        <item name="android:navigationBarColor">#434549</item>
+        <item name="android:windowBackground">#434549</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
+    </style>
+    <style name="Theme.OkMap.Dusk_Dim" parent="Base.Theme.OkMap">
+        <item name="gRim">#70FFFFFF</item>
+        <item name="gSurface">#44424A</item>
+        <item name="gPanel">#EB4A4854</item>
+        <item name="gStroke">#3DFFFFFF</item>
+        <item name="gFab">#F54A4854</item>
+        <item name="gDialog">#504D5B</item>
+        <item name="gTextPrimary">#FCFBFD</item>
+        <item name="gTextSecondary">#DEDCE7</item>
+        <item name="gHint">#B8B5C5</item>
+        <item name="gIcon">#F2F0F8</item>
+        <item name="gAccent">#B5A6F0</item>
+        <item name="gOnAccent">#231552</item>
+        <item name="gAccentContainer">#473A85</item>
+        <item name="gOnAccentContainer">#F4F1FB</item>
+        <item name="gRaisedTop">#FA5C5A65</item>
+        <item name="gRaisedBottom">#FA3A3842</item>
+        <item name="gRaisedEdge">#1E1D22</item>
+        <item name="gAccentTop">#BCAFF2</item>
+        <item name="gAccentBottom">#9C8FCE</item>
+        <item name="gAccentEdge">#706795</item>
+        <item name="gCrosshair">#FF7088</item>
+        <item name="gCrosshairHalo">#CC44424A</item>
+        <item name="colorPrimary">#B5A6F0</item>
+        <item name="colorOnPrimary">#231552</item>
+        <item name="colorPrimaryContainer">#473A85</item>
+        <item name="colorOnPrimaryContainer">#F4F1FB</item>
+        <item name="colorSecondaryContainer">#473A85</item>
+        <item name="colorOnSecondaryContainer">#F4F1FB</item>
+        <item name="colorSurface">#44424A</item>
+        <item name="colorOnSurface">#FCFBFD</item>
+        <item name="colorOnSurfaceVariant">#DEDCE7</item>
+        <item name="colorSurfaceContainer">#504D5B</item>
+        <item name="colorSurfaceContainerHigh">#504D5B</item>
+        <item name="colorOutline">#B8B5C5</item>
+        <item name="android:statusBarColor">#44424A</item>
+        <item name="android:navigationBarColor">#44424A</item>
+        <item name="android:windowBackground">#44424A</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
+    </style>
+    <style name="Theme.OkMap.Graphite_Dim" parent="Base.Theme.OkMap">
+        <item name="gRim">#70FFFFFF</item>
+        <item name="gSurface">#424243</item>
+        <item name="gPanel">#EB494A4B</item>
+        <item name="gStroke">#3DFFFFFF</item>
+        <item name="gFab">#F5494A4B</item>
+        <item name="gDialog">#4F5051</item>
+        <item name="gTextPrimary">#FCFCFC</item>
+        <item name="gTextSecondary">#DCDDDF</item>
+        <item name="gHint">#B6B8BB</item>
+        <item name="gIcon">#F3F4F5</item>
+        <item name="gAccent">#E4E6E9</item>
+        <item name="gOnAccent">#141517</item>
+        <item name="gAccentContainer">#34363A</item>
+        <item name="gOnAccentContainer">#F4F4F5</item>
+        <item name="gRaisedTop">#FA5B5C5D</item>
+        <item name="gRaisedBottom">#FA393A3A</item>
+        <item name="gRaisedEdge">#1D1E1E</item>
+        <item name="gAccentTop">#E7E8EB</item>
+        <item name="gAccentBottom">#C4C6C8</item>
+        <item name="gAccentEdge">#8D8F90</item>
+        <item name="gCrosshair">#FF8070</item>
+        <item name="gCrosshairHalo">#CC424243</item>
+        <item name="colorPrimary">#E4E6E9</item>
+        <item name="colorOnPrimary">#141517</item>
+        <item name="colorPrimaryContainer">#34363A</item>
+        <item name="colorOnPrimaryContainer">#F4F4F5</item>
+        <item name="colorSecondaryContainer">#34363A</item>
+        <item name="colorOnSecondaryContainer">#F4F4F5</item>
+        <item name="colorSurface">#424243</item>
+        <item name="colorOnSurface">#FCFCFC</item>
+        <item name="colorOnSurfaceVariant">#DCDDDF</item>
+        <item name="colorSurfaceContainer">#4F5051</item>
+        <item name="colorSurfaceContainerHigh">#4F5051</item>
+        <item name="colorOutline">#B6B8BB</item>
+        <item name="android:statusBarColor">#424243</item>
+        <item name="android:navigationBarColor">#424243</item>
+        <item name="android:windowBackground">#424243</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
+    </style>
+    <style name="Theme.OkMap.Sunset_Dim" parent="Base.Theme.OkMap">
+        <item name="gRim">#70FFFFFF</item>
+        <item name="gSurface">#484243</item>
+        <item name="gPanel">#EB50484A</item>
+        <item name="gStroke">#3DFFFFFF</item>
+        <item name="gFab">#F550484A</item>
+        <item name="gDialog">#564D50</item>
+        <item name="gTextPrimary">#FDFBFB</item>
+        <item name="gTextSecondary">#E5DBDE</item>
+        <item name="gHint">#C1B4B8</item>
+        <item name="gIcon">#F7F0F2</item>
+        <item name="gAccent">#F29BB5</item>
+        <item name="gOnAccent">#45091F</item>
+        <item name="gAccentContainer">#6E2540</item>
+        <item name="gOnAccentContainer">#FBF1F4</item>
+        <item name="gRaisedTop">#FA625A5C</item>
+        <item name="gRaisedBottom">#FA3E383A</item>
+        <item name="gRaisedEdge">#201D1E</item>
+        <item name="gAccentTop">#F3A5BC</item>
+        <item name="gAccentBottom">#D0859C</item>
+        <item name="gAccentEdge">#966070</item>
+        <item name="gCrosshair">#6FC3FF</item>
+        <item name="gCrosshairHalo">#CC484243</item>
+        <item name="colorPrimary">#F29BB5</item>
+        <item name="colorOnPrimary">#45091F</item>
+        <item name="colorPrimaryContainer">#6E2540</item>
+        <item name="colorOnPrimaryContainer">#FBF1F4</item>
+        <item name="colorSecondaryContainer">#6E2540</item>
+        <item name="colorOnSecondaryContainer">#FBF1F4</item>
+        <item name="colorSurface">#484243</item>
+        <item name="colorOnSurface">#FDFBFB</item>
+        <item name="colorOnSurfaceVariant">#E5DBDE</item>
+        <item name="colorSurfaceContainer">#564D50</item>
+        <item name="colorSurfaceContainerHigh">#564D50</item>
+        <item name="colorOutline">#C1B4B8</item>
+        <item name="android:statusBarColor">#484243</item>
+        <item name="android:navigationBarColor">#484243</item>
+        <item name="android:windowBackground">#484243</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
+    </style>
+    <style name="Theme.OkMap.Mint_Dim" parent="Base.Theme.OkMap">
+        <item name="gRim">#70FFFFFF</item>
+        <item name="gSurface">#3D4646</item>
+        <item name="gPanel">#EB444E4D</item>
+        <item name="gStroke">#3DFFFFFF</item>
+        <item name="gFab">#F5444E4D</item>
+        <item name="gDialog">#495554</item>
+        <item name="gTextPrimary">#FAFDFC</item>
+        <item name="gTextSecondary">#D8E3E1</item>
+        <item name="gHint">#B0C0BF</item>
+        <item name="gIcon">#ECF6F5</item>
+        <item name="gAccent">#6FD6D2</item>
+        <item name="gOnAccent">#032B2C</item>
+        <item name="gAccentContainer">#17504F</item>
+        <item name="gOnAccentContainer">#EBF8F7</item>
+        <item name="gRaisedTop">#FA57605F</item>
+        <item name="gRaisedBottom">#FA353D3C</item>
+        <item name="gRaisedEdge">#1B1F1F</item>
+        <item name="gAccentTop">#7DDAD6</item>
+        <item name="gAccentBottom">#5FB8B5</item>
+        <item name="gAccentEdge">#458582</item>
+        <item name="gCrosshair">#FF7088</item>
+        <item name="gCrosshairHalo">#CC3D4646</item>
+        <item name="colorPrimary">#6FD6D2</item>
+        <item name="colorOnPrimary">#032B2C</item>
+        <item name="colorPrimaryContainer">#17504F</item>
+        <item name="colorOnPrimaryContainer">#EBF8F7</item>
+        <item name="colorSecondaryContainer">#17504F</item>
+        <item name="colorOnSecondaryContainer">#EBF8F7</item>
+        <item name="colorSurface">#3D4646</item>
+        <item name="colorOnSurface">#FAFDFC</item>
+        <item name="colorOnSurfaceVariant">#D8E3E1</item>
+        <item name="colorSurfaceContainer">#495554</item>
+        <item name="colorSurfaceContainerHigh">#495554</item>
+        <item name="colorOutline">#B0C0BF</item>
+        <item name="android:statusBarColor">#3D4646</item>
+        <item name="android:navigationBarColor">#3D4646</item>
+        <item name="android:windowBackground">#3D4646</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
+    </style>
+    <style name="Theme.OkMap.Contrast_Dim" parent="Base.Theme.OkMap">
+        <item name="gRim">#70FFFFFF</item>
+        <item name="gSurface">#373737</item>
+        <item name="gPanel">#EB414141</item>
+        <item name="gStroke">#3DFFFFFF</item>
+        <item name="gFab">#F5414141</item>
+        <item name="gDialog">#484848</item>
+        <item name="gTextPrimary">#FFFFFF</item>
+        <item name="gTextSecondary">#EFEFEF</item>
+        <item name="gHint">#CBCBCB</item>
+        <item name="gIcon">#FFFFFF</item>
+        <item name="gAccent">#FFD400</item>
+        <item name="gOnAccent">#000000</item>
+        <item name="gAccentContainer">#3A3200</item>
+        <item name="gOnAccentContainer">#FFF5C2</item>
+        <item name="gRaisedTop">#FA545454</item>
+        <item name="gRaisedBottom">#FA333333</item>
+        <item name="gRaisedEdge">#1A1A1A</item>
+        <item name="gAccentTop">#FFD81A</item>
+        <item name="gAccentBottom">#DBB600</item>
+        <item name="gAccentEdge">#9E8300</item>
+        <item name="gCrosshair">#FF5C7A</item>
+        <item name="gCrosshairHalo">#CC373737</item>
+        <item name="colorPrimary">#FFD400</item>
+        <item name="colorOnPrimary">#000000</item>
+        <item name="colorPrimaryContainer">#3A3200</item>
+        <item name="colorOnPrimaryContainer">#FFF5C2</item>
+        <item name="colorSecondaryContainer">#3A3200</item>
+        <item name="colorOnSecondaryContainer">#FFF5C2</item>
+        <item name="colorSurface">#373737</item>
+        <item name="colorOnSurface">#FFFFFF</item>
+        <item name="colorOnSurfaceVariant">#EFEFEF</item>
+        <item name="colorSurfaceContainer">#484848</item>
+        <item name="colorSurfaceContainerHigh">#484848</item>
+        <item name="colorOutline">#CBCBCB</item>
+        <item name="android:statusBarColor">#373737</item>
+        <item name="android:navigationBarColor">#373737</item>
+        <item name="android:windowBackground">#373737</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
     </style>
     <!-- default (manifest) theme -->
     <style name="Theme.OkMap" parent="Theme.OkMap.Forest" />
