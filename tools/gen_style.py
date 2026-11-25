@@ -257,9 +257,10 @@ layer("boundary-6", "line", "boundary", ["all", ["==", ["get", "admin_level"], 6
       paint={"line-color": c("#c3b9d2", "#5d5470"), "line-dasharray": [2, 2], "line-width": 0.9})
 
 # ------------------------------------------------------------------ dots
-layer("peak-dot", "circle", "mountain_peak", ["has", "name"], minzoom=8,
-      paint={"circle-radius": 2.6, "circle-color": c("#8c6a4a", "#c49a6c"), "circle-stroke-width": 0.8,
-             "circle-stroke-color": c("#ffffff", "#1c1f24")})
+# peaks / spot heights are shown only in the elevation map type: hidden here, the app turns them on (visibility)
+layer("peak-dot", "symbol", "mountain_peak", ["has", "ele"], minzoom=9, source="openmaptiles-labels",
+      layout={"icon-image": "ic-peak", "icon-size": zi((9, 0.5), (14, 0.7)), "icon-allow-overlap": True,
+              "visibility": "none"})
 NOT_TR = ["!", TRANSPORT]
 layer("poi-dot", "circle", "poi", ["all", ["has", "name"], NOT_TR], minzoom=15,
       paint={"circle-radius": 3, "circle-color": c("#8793a5", "#9aa7bb"), "circle-stroke-width": 1,
@@ -281,12 +282,12 @@ icon("tr-aerodrome-dot", "aerodrome_label", ["!=", ["get", "class"], "private"],
 
 # ------------------------------------------------------------------ labels
 # Symbol layers whose id starts with "lbl-" get their text-field replaced at runtime (LabelExpr.kt).
-HALO = c("rgba(255,255,255,0.92)", "rgba(16,19,24,0.9)")
-WHALO = c("rgba(196,222,246,0.92)", "rgba(10,26,44,0.9)")
+HALO = c("rgba(255,255,255,0.58)", "rgba(16,19,24,0.58)")
+WHALO = c("rgba(196,222,246,0.6)", "rgba(10,26,44,0.6)")
 
 
 def label(id, sl, filter, minzoom, size, color, halo=None, maxzoom=None, line=False, anchor=None,
-          offset=None, sort=None, width=8, halo_w=1.9, spacing=None):
+          offset=None, sort=None, width=8, halo_w=1.0, spacing=None):
     lo = {"text-field": ["to-string", ["get", "name"]], "text-font": FONT, "text-size": size,
           "text-max-width": width, "text-padding": 2}
     if line:
@@ -300,7 +301,7 @@ def label(id, sl, filter, minzoom, size, color, halo=None, maxzoom=None, line=Fa
     if spacing:
         lo["text-letter-spacing"] = spacing
     layer(id, "symbol", sl, filter, minzoom, maxzoom, layout=lo, source="openmaptiles-labels",
-          paint={"text-color": color, "text-halo-color": halo or HALO, "text-halo-width": halo_w})
+          paint={"text-color": color, "text-halo-color": halo or HALO, "text-halo-width": halo_w, "text-halo-blur": 1.1})
 
 
 RANK = ["to-number", ["get", "rank"], 99]
@@ -315,8 +316,11 @@ label("lbl-road-major", "transportation_name", ["all", REF, cls("motorway", "tru
 label("lbl-road-minor", "transportation_name",
       ["all", REF, cls("tertiary", "minor", "service", "track", "path")], 13,
       zi((13, 10), (17, 12)), c("#555555", "#bbbbbb"), line=True)
-label("lbl-peak", "mountain_peak", ["has", "name"], 8, zi((8, 10), (14, 12)), c("#7a5a3a", "#d3a574"),
-      anchor="top", offset=[0, 0.5], sort=["-", 0, ["to-number", ["get", "ele"], 0]], width=7)
+label("lbl-peak", "mountain_peak", ["has", "ele"], 9, zi((9, 10), (14, 12)), c("#7a5a3a", "#d3a574"),
+      anchor="top", offset=[0, 0.7], sort=["-", 0, ["to-number", ["get", "ele"], 0]], width=7)
+for _l in L:
+    if _l["id"] == "lbl-peak":
+        _l["layout"]["visibility"] = "none"
 label("lbl-poi", "poi", ["all", ["has", "name"], NOT_TR], 15, 11, c("#5b6574", "#aab6c8"), anchor="top", offset=[0, 0.6], width=7)
 label("lbl-aerodrome", "aerodrome_label", ["has", "name"], 8, 11, c("#556070", "#a0acc0"), anchor="top",
       offset=[0, 0.6])

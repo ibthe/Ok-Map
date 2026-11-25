@@ -23,6 +23,8 @@
     <!-- top: search, results, coordinates -->
     <LinearLayout
         android:id="@+id/topColumn"
+        android:clipChildren="false"
+        android:clipToPadding="false"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
@@ -80,11 +82,16 @@
         <HorizontalScrollView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/space_1"
+            android:layout_marginStart="-12dp"
+            android:layout_marginTop="-6dp"
+            android:layout_marginEnd="-12dp"
+            android:layout_marginBottom="-10dp"
             android:clipChildren="false"
             android:clipToPadding="false"
-            android:paddingTop="@dimen/space_1"
-            android:paddingBottom="@dimen/space_2"
+            android:paddingStart="12dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="18dp"
             android:scrollbars="none">
 
             <LinearLayout
@@ -198,6 +205,8 @@
     <!-- right: round map controls, right edge flush with the primary button below -->
     <LinearLayout
         android:id="@+id/rightControls"
+        android:clipChildren="false"
+        android:clipToPadding="false"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="end|bottom"
@@ -242,6 +251,8 @@
     <!-- bottom: menu + primary action -->
     <LinearLayout
         android:id="@+id/dock"
+        android:clipChildren="false"
+        android:clipToPadding="false"
         android:layout_width="match_parent"
         android:layout_height="@dimen/control_lg"
         android:layout_gravity="bottom"
@@ -476,11 +487,13 @@
                 android:clickable="true"
                 android:focusable="true"
                 android:gravity="center"
-                android:paddingStart="@dimen/space_3"
-                android:paddingEnd="@dimen/space_3"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="3dp"
                 android:stateListAnimator="@animator/press"
                 android:textAppearance="@style/TextAppearance.G.Caption"
-                android:textColor="@color/chip_text" />
+                android:textColor="@color/chip_text"
+                android:textSize="13sp" />
 
             <TextView
                 android:id="@+id/btnCompassClose"
@@ -507,7 +520,7 @@
             <TextView
                 android:id="@+id/chipNorth"
                 android:layout_width="0dp"
-                android:layout_height="44dp"
+                android:layout_height="48dp"
                 android:layout_marginEnd="@dimen/space_2"
                 android:layout_weight="1"
                 android:background="@drawable/bg_chip"
@@ -516,14 +529,18 @@
                 android:focusable="true"
                 android:gravity="center"
                 android:maxLines="1"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
+                android:paddingBottom="3dp"
                 android:stateListAnimator="@animator/press"
                 android:text="Север"
                 android:textAppearance="@style/TextAppearance.G.Label"
-                android:textColor="@color/chip_text" />
+                android:textColor="@color/chip_text"
+                android:textSize="17sp" />
             <TextView
                 android:id="@+id/chipQibla"
                 android:layout_width="0dp"
-                android:layout_height="44dp"
+                android:layout_height="48dp"
                 android:layout_marginEnd="@dimen/space_2"
                 android:layout_weight="1"
                 android:background="@drawable/bg_chip"
@@ -532,14 +549,18 @@
                 android:focusable="true"
                 android:gravity="center"
                 android:maxLines="1"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
+                android:paddingBottom="3dp"
                 android:stateListAnimator="@animator/press"
                 android:text="Кибла"
                 android:textAppearance="@style/TextAppearance.G.Label"
-                android:textColor="@color/chip_text" />
+                android:textColor="@color/chip_text"
+                android:textSize="17sp" />
             <TextView
                 android:id="@+id/chipPlace"
                 android:layout_width="0dp"
-                android:layout_height="44dp"
+                android:layout_height="48dp"
                 android:layout_weight="1"
                 android:background="@drawable/bg_chip"
                 android:clickable="true"
@@ -547,10 +568,14 @@
                 android:focusable="true"
                 android:gravity="center"
                 android:maxLines="1"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
+                android:paddingBottom="3dp"
                 android:stateListAnimator="@animator/press"
                 android:text="Место"
                 android:textAppearance="@style/TextAppearance.G.Label"
-                android:textColor="@color/chip_text" />
+                android:textColor="@color/chip_text"
+                android:textSize="17sp" />
         </LinearLayout>
 
         <app.okmap.CompassView

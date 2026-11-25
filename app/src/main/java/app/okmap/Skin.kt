@@ -7,7 +7,10 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.RippleDrawable
 import android.graphics.drawable.StateListDrawable
+import android.graphics.Outline
 import android.util.TypedValue
+import android.view.View
+import android.view.ViewOutlineProvider
 
 /**
  * Backgrounds of panels and "key" buttons built in code, so that their opacity can be changed by the user (Menu -> Оформление).
@@ -67,5 +70,22 @@ object Skin {
         sl.addState(intArrayOf(android.R.attr.state_pressed), keyLayers(ctx, false, 28f, false, true, opacity))
         sl.addState(intArrayOf(), keyLayers(ctx, false, 28f, false, false, opacity))
         return RippleDrawable(ColorStateList.valueOf(0x26808080), sl, null)
+    }
+
+    /**
+     * The shadow of an elevated view follows its outline. Without this the shadow of a ripple/layer background is
+     * a rectangle (it looks "cut off" around round keys). The outline is the real shape; its alpha follows the fill
+     * opacity so a see-through panel does not show a dark shadow through itself.
+     */
+    fun shape(v: View, oval: Boolean, radiusDp: Float, opacity: Float = 1f) {
+        val r = radiusDp * v.resources.displayMetrics.density
+        v.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                if (oval) outline.setOval(0, 0, view.width, view.height)
+                else outline.setRoundRect(0, 0, view.width, view.height, minOf(r, view.height / 2f))
+                outline.alpha = opacity.coerceIn(0.2f, 1f)
+            }
+        }
+        v.clipToOutline = false
     }
 }

@@ -45,6 +45,8 @@ jobs:
             app/src/main/assets/places.stamp
             app/src/main/assets/graph.bin
             app/src/main/assets/graph.stamp
+            app/src/main/assets/contours.mbtiles
+            app/src/main/assets/contours.stamp
           # build_places.py / reference_places.json are NOT in the key: they only rebuild the search index
           # (see "Decide what has to be rebuilt"), the 30-60 min tile build stays cached
           key: mapdata-v3-${{ hashFiles('tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py', 'tools/build_relief.py') }}
@@ -66,6 +68,10 @@ jobs:
           GH=$(cat tools/build_graph.py | sha1sum | cut -d' ' -f1)
           echo "$GH" > /tmp/graph.stamp
           [ "$(cat app/src/main/assets/graph.stamp 2>/dev/null)" = "$GH" ] || echo "graph=true" >> "$GITHUB_OUTPUT"
+          [ -s app/src/main/assets/contours.mbtiles ] || echo "contours=true" >> "$GITHUB_OUTPUT"
+          CH=$(cat tools/build_contours.py | sha1sum | cut -d' ' -f1)
+          echo "$CH" > /tmp/contours.stamp
+          [ "$(cat app/src/main/assets/contours.stamp 2>/dev/null)" = "$CH" ] || echo "contours=true" >> "$GITHUB_OUTPUT"
           [ -s app/src/main/assets/relief.mbtiles ] || echo "relief=true" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
           ls -lh app/src/main/assets || true
@@ -126,6 +132,17 @@ jobs:
         continue-on-error: true
         working-directory: tools
         run: python build_relief.py ../app/src/main/assets/relief.mbtiles
+
+      # Contour lines for the "Высоты" map type, computed from the relief DEM. Optional: the APK builds without them.
+      - name: Build contour lines (elevation map type)
+        if: steps.need.outputs.contours == 'true' || steps.need.outputs.relief == 'true'
+        continue-on-error: true
+        run: |
+          python -m pip install --quiet numpy pillow scipy contourpy shapely
+          python tools/test_contours.py
+          python tools/build_contours.py app/src/main/assets/relief.mbtiles app/src/main/assets/contours.mbtiles
+          ls -lh app/src/main/assets/contours.mbtiles
+          cp /tmp/contours.stamp app/src/main/assets/contours.stamp
 
       - name: Build label fonts (Latin + Cyrillic + Georgian)
         run: |

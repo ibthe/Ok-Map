@@ -348,11 +348,61 @@ class MainActivity : AppCompatActivity() {
 
     private fun mapType(): String = prefs.getString("map_type", "scheme") ?: "scheme"
 
+    /** "Высоты": contour lines (if contours.mbtiles exists) with labels on every 5th line, and all peaks / spot heights switched on. */
+    private fun addElevationMode(style: JSONObject, layers: JSONArray) {
+        val night = isNight()
+        for (i in 0 until layers.length()) {
+            val l = layers.getJSONObject(i)
+            if (l.optString("id") == "peak-dot" || l.optString("id") == "lbl-peak") l.optJSONObject("layout")?.remove("visibility")
+        }
+        val file = File(filesDir, "contours.mbtiles")
+        if (!file.exists()) return
+        style.getJSONObject("sources").put("contours", JSONObject()
+            .put("type", "vector").put("url", "mbtiles://" + file.absolutePath).put("minzoom", 9).put("maxzoom", 12))
+        var font: JSONArray? = null
+        var at = layers.length()
+        for (i in 0 until layers.length()) {
+            val l = layers.getJSONObject(i)
+            if (font == null && l.optString("id") == "lbl-peak") font = l.optJSONObject("layout")?.optJSONArray("text-font")
+            if (at == layers.length() && (l.optString("id").startsWith("tunnel") || l.optString("id").startsWith("road"))) at = i
+        }
+        val minor = if (night) "#d3a574" else "#a8693a"
+        val major = if (night) "#e8bd88" else "#7d4a22"
+        fun width(a: Double, b: Double) = JSONArray("[\"interpolate\",[\"linear\"],[\"zoom\"],9,$a,14,$b]")
+        val defs = listOf(
+            JSONObject().put("id", "contour-minor").put("type", "line").put("source", "contours").put("source-layer", "contour")
+                .put("filter", JSONArray("[\"==\",[\"get\",\"idx\"],0]")).put("minzoom", 10)
+                .put("layout", JSONObject().put("line-join", "round"))
+                .put("paint", JSONObject().put("line-color", minor).put("line-opacity", 0.55).put("line-width", width(0.35, 0.9))),
+            JSONObject().put("id", "contour-major").put("type", "line").put("source", "contours").put("source-layer", "contour")
+                .put("filter", JSONArray("[\"==\",[\"get\",\"idx\"],1]"))
+                .put("layout", JSONObject().put("line-join", "round"))
+                .put("paint", JSONObject().put("line-color", major).put("line-opacity", 0.85).put("line-width", width(0.7, 1.7))),
+            JSONObject().put("id", "contour-label").put("type", "symbol").put("source", "contours").put("source-layer", "contour")
+                .put("filter", JSONArray("[\"==\",[\"get\",\"idx\"],1]")).put("minzoom", 11)
+                .put("layout", JSONObject().put("symbol-placement", "line").put("symbol-spacing", 380)
+                    .put("text-field", JSONArray("[\"to-string\",[\"get\",\"ele\"]]")).put("text-size", 10.5)
+                    .put("text-max-angle", 30).apply { if (font != null) put("text-font", font) })
+                .put("paint", JSONObject().put("text-color", major).put("text-halo-color", if (night) "rgba(16,19,24,0.5)" else "rgba(255,255,255,0.5)")
+                    .put("text-halo-width", 1.0).put("text-halo-blur", 1.0))
+        )
+        // rebuild the array with the contour layers inserted below roads
+        val copy = ArrayList<JSONObject>()
+        for (i in 0 until layers.length()) copy.add(layers.getJSONObject(i))
+        while (layers.length() > 0) layers.remove(0)
+        for ((i, l) in copy.withIndex()) {
+            if (i == at) defs.forEach { layers.put(it) }
+            layers.put(l)
+        }
+        if (at >= copy.size) defs.forEach { layers.put(it) }
+    }
+
     private fun loadStyle() {
         val m = map ?: return
         val tiles = tilesFile ?: return
         val mode = themeMode()
         val sat = mapType() == "sat"
+        val topo = mapType() == "topo"
         val name = if (sat) "style_sat" + (if (mode == "dark") "_dark" else "") + ".json"
         else "style_" + colorTheme() + (when (mode) { "dark" -> "_dark"; "dim" -> "_dim"; else -> "" }) + ".json"
         val relief = File(filesDir, "relief.mbtiles")
@@ -373,6 +423,7 @@ class MainActivity : AppCompatActivity() {
             }
             dst.put(l)
         }
+        if (topo) addElevationMode(obj, dst)
         obj.put("layers", dst)
         if (!relief.exists()) obj.getJSONObject("sources").remove("relief")
         if (!hasImagery) obj.getJSONObject("sources").remove("sat")
@@ -793,11 +844,11 @@ class MainActivity : AppCompatActivity() {
         return row
     }
 
-    /** Scheme / Satellite. Satellite = stylised natural-colour relief map; real imagery appears if sat.mbtiles is installed. */
+    /** Scheme / Satellite / Elevation. Satellite = stylised natural-colour relief map (real imagery if sat.mbtiles is installed); Elevation = contour lines + all spot heights. */
     private fun mapTypeSwitch(): View {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(4), 0, dp(12)) }
         val g = com.google.android.material.button.MaterialButtonToggleGroup(this).apply { isSingleSelection = true; isSelectionRequired = true }
-        val types = listOf("scheme" to "Схема", "sat" to "Спутник")
+        val types = listOf("scheme" to "Схема", "sat" to "Спутник", "topo" to "Высоты")
         val ids = types.map { View.generateViewId() }
         types.forEachIndexed { i, t ->
             g.addView(com.google.android.material.button.MaterialButton(this, null,
@@ -816,6 +867,8 @@ class MainActivity : AppCompatActivity() {
                     prefs.edit().putBoolean("sat_hint", true).apply()
                     toast("Спутниковых снимков в приложении нет: показан спутниковый вид из данных карты и рельефа")
                 }
+                if (t == "topo" && !File(filesDir, "contours.mbtiles").exists())
+                    toast("Данных линий высоты в этой сборке нет: показаны только отметки высот")
             }
         }
         box.addView(g, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
@@ -882,9 +935,7 @@ class MainActivity : AppCompatActivity() {
                     add(menuSwitch("Голосовые подсказки", prefs.getBoolean("nav_voice", true), true,
                         "Телефон проговаривает повороты") { on -> prefs.edit().putBoolean("nav_voice", on).apply() })
                     add(menuSwitch("Объезжать грунтовки", prefs.getBoolean("nav_avoid_unpaved", true), true,
-                        "Ехать по асфальту, если есть выбор") { on -> prefs.edit().putBoolean("nav_avoid_unpaved", on).apply() })
-                    add(menuRow("Компас", null, "Север, кибла или выбранное место", act { compass.openLast() }))
-                    add(menuRow("Кибла", null, "Направление на Мекку для намаза", act { compass.open(Compass.Kind.QIBLA) }), true)
+                        "Ехать по асфальту, если есть выбор") { on -> prefs.edit().putBoolean("nav_avoid_unpaved", on).apply() }, true)
                     content.addView(note("Чтобы проложить маршрут к месту: найдите его в поиске или нажмите на карту и выберите «Маршрут»."))
                 }
                 2 -> {   // MY PLACES: points, tracks, files
@@ -915,7 +966,8 @@ class MainActivity : AppCompatActivity() {
 
         // tab bar: icons only (same size and stroke), the active tab is "pressed in" and tinted with the accent
         val heading = label("", 22f, R.attr.gTextPrimary, true).apply { setPadding(dp(4), 0, 0, dp(4)) }
-        val tabRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val tabRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; clipChildren = false }
+        root.clipChildren = false
         val tabs = ArrayList<View>()
         fun selectTab(i: Int) { tabs.forEachIndexed { k, v -> v.isSelected = k == i }; heading.text = MENU_TABS[i].second; page(i) }
         MENU_TABS.forEachIndexed { i, (icon, name) ->
@@ -924,6 +976,8 @@ class MainActivity : AppCompatActivity() {
                 imageTintList = resources.getColorStateList(R.color.chip_text, theme)
                 scaleType = ImageView.ScaleType.CENTER
                 background = Skin.chip(this@MainActivity, 1f)
+                Skin.shape(this, false, 18f, 1f)
+                elevation = dp(2).toFloat()
                 stateListAnimator = android.animation.AnimatorInflater.loadStateListAnimator(this@MainActivity, R.animator.press)
                 isClickable = true
                 isFocusable = true
@@ -968,17 +1022,17 @@ class MainActivity : AppCompatActivity() {
     private fun applyOpacity() {
         val a = uiOpacity()
         fun panel(id: Int, r: Float) { findViewById<View>(id)?.background = Skin.panel(this, r, a) }
-        panel(R.id.searchBar, 28f); panel(R.id.rulerBar, 20f); panel(R.id.navTop, 20f); panel(R.id.navBottom, 20f)
-        panel(R.id.compassPanel, 20f); panel(R.id.lvResults, 20f); panel(R.id.tvInfo, 12f)
+        fun round(id: Int, r: Float) { findViewById<View>(id)?.let { it.background = Skin.panel(this, r, a); Skin.shape(it, false, r, a) } }
+        round(R.id.searchBar, 28f); round(R.id.rulerBar, 20f); round(R.id.navTop, 20f); round(R.id.navBottom, 20f)
+        round(R.id.compassPanel, 20f); round(R.id.lvResults, 20f); round(R.id.tvInfo, 12f)
         for (id in listOf(R.id.btnFit, R.id.btnLocation, R.id.btnCompass, R.id.btnMenu, R.id.btnRec))
-            findViewById<View>(id)?.background = Skin.key(this, true, 28f, a)
+            findViewById<View>(id)?.let { it.background = Skin.key(this, true, 28f, a); Skin.shape(it, true, 28f, a) }
         for (id in listOf(R.id.btnNavCancel, R.id.btnCompassClose, R.id.btnRulerUndo, R.id.btnRulerDelete))
-            findViewById<View>(id)?.background = Skin.key(this, false, 28f, a)
+            findViewById<View>(id)?.let { it.background = Skin.key(this, false, 28f, a); Skin.shape(it, false, 28f, a) }
         for (id in listOf(R.id.btnCompassMap, R.id.chipNorth, R.id.chipQibla, R.id.chipPlace))
-            findViewById<View>(id)?.background = Skin.chip(this, a)
-        findViewById<View>(R.id.btnPoint)?.background = Skin.key(this, false, 28f, 1f, accent = true)
-        findViewById<View>(R.id.btnNavGo)?.background = Skin.key(this, false, 28f, 1f, accent = true)
-        findViewById<View>(R.id.btnRulerMode)?.background = Skin.key(this, false, 28f, 1f, accent = true)
+            findViewById<View>(id)?.let { it.background = Skin.chip(this, a); Skin.shape(it, false, 28f, a) }
+        for (id in listOf(R.id.btnPoint, R.id.btnNavGo, R.id.btnRulerMode))
+            findViewById<View>(id)?.let { it.background = Skin.key(this, false, 28f, 1f, accent = true); Skin.shape(it, false, 28f, 1f) }
         val glow = a < 0.8f
         val halo = themeColor(R.attr.gSurface)
         for (id in listOf(R.id.tvInfo, R.id.rulerText, R.id.navDist, R.id.navText, R.id.navStat, R.id.navSub, R.id.cTitle, R.id.cInfo, R.id.cGuide, R.id.cCal))
@@ -1061,6 +1115,7 @@ class MainActivity : AppCompatActivity() {
                 minimumHeight = dp(44)
                 setPadding(dp(14), 0, dp(14), dp(3))
                 background = Skin.chip(this@MainActivity, uiOpacity())
+                Skin.shape(this, false, 28f, uiOpacity())
                 isSelected = on
                 elevation = dp(3).toFloat()
                 stateListAnimator = android.animation.AnimatorInflater.loadStateListAnimator(this@MainActivity, R.animator.press)
@@ -1515,7 +1570,7 @@ class MainActivity : AppCompatActivity() {
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
     companion object {
-        private val DATA_FILES = listOf("map.mbtiles", "relief.mbtiles", "places.db", "graph.bin", "sat.mbtiles")
+        private val DATA_FILES = listOf("map.mbtiles", "relief.mbtiles", "places.db", "graph.bin", "sat.mbtiles", "contours.mbtiles")
         // transport POIs have their own always-visible layers (tr-*, lbl-station ...); keep them out of the generic POI layers
         private const val TR_LIST = "'station','halt','subway','tram_stop','bus_station','bus_stop','ferry_terminal','harbor'"
         private const val TRANSPORT_EXPR = "['any',['match',['get','class'],[$TR_LIST],true,false]," +

@@ -23,8 +23,22 @@ object MapIcons {
             "ic-train" to badge(size, d, 0xFF1E6FD9.toInt()) { c, p, u, bg -> train(c, p, u, bg) },
             "ic-bus" to badge(size, d, 0xFFD9791F.toInt()) { c, p, u, bg -> bus(c, p, u, bg) },
             "ic-stop" to badge((size * 0.8f).toInt(), d, 0xFFD9791F.toInt()) { c, p, u, bg -> stop(c, p, u, bg) },
-            "ic-ferry" to badge(size, d, 0xFF1C9A8C.toInt()) { c, p, u, bg -> ferry(c, p, u, bg) }
+            "ic-ferry" to badge(size, d, 0xFF1C9A8C.toInt()) { c, p, u, bg -> ferry(c, p, u, bg) },
+            "ic-peak" to peak((size * 0.6f).toInt(), d)
         )
+    }
+
+    /** spot height / summit: a small brown triangle with a white edge */
+    private fun peak(size: Int, density: Float): Bitmap {
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        bmp.density = (160 * density).toInt()
+        val c = Canvas(bmp)
+        val u = size / 24f
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        p.color = 0x73000000; poly(c, p, u, 12f, 0.6f, 23.6f, 22.4f, 0.4f, 22.4f)
+        p.color = WHITE; poly(c, p, u, 12f, 2.2f, 22f, 21.4f, 2f, 21.4f)
+        p.color = 0xFF8A5A30.toInt(); poly(c, p, u, 12f, 6.4f, 18.6f, 19.2f, 5.4f, 19.2f)
+        return bmp
     }
 
     private fun badge(size: Int, density: Float, color: Int, glyph: (Canvas, Paint, Float, Int) -> Unit): Bitmap {

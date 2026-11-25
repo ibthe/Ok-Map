@@ -62,7 +62,8 @@ object LabelExpr {
         val s = when {
             // peaks: names + elevation
             layerId.startsWith("lbl-peak") ->
-                "['let','n',$n,['case',['has','ele'],['concat',['var','n'],'\\n',['to-string',['get','ele']],' m'],['var','n']]]"
+                "['let','n',$n,['case',['has','ele'],['case',['==',['var','n'],''],['concat',['to-string',['get','ele']],' м']," +
+                    "['concat',['var','n'],'\\n',['to-string',['get','ele']],' м']],['var','n']]]"
             // roads: if no name in the selected languages, show the road reference (M1, S12...)
             layerId.startsWith("lbl-road") ->
                 "['let','n',$n,['case',['==',['var','n'],''],['to-string',['coalesce',['get','ref'],'']],['var','n']]]"
