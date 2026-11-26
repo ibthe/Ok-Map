@@ -42,14 +42,22 @@ class Graph:
         self.name_bytes = raw[pos[0]:pos[0] + self.NB]
         pos[0] += self.NB + (-self.NB) % 4
         self.cell_start, self.cell_data = take("<i4", self.W * self.H + 1), take("<i4", self.CD)
+        if self.version not in (1, 2):
+            raise ValueError(f"unsupported graph format version {self.version}")
         self.turns = set()
-        if self.version >= 2 and pos[0] + 4 <= len(raw):
+        if self.version == 2:
+            if pos[0] + 4 > len(raw):
+                raise ValueError("missing turn-restriction section")
             count = struct.unpack_from("<i", raw, pos[0])[0]
             pos[0] += 4
-            if count < 0 or pos[0] + count * 8 > len(raw):
-                raise ValueError("invalid turn-restriction section")
+            if count < 0 or pos[0] + count * 8 != len(raw):
+                raise ValueError("invalid turn-restriction section size")
             pairs = np.frombuffer(raw, dtype="<i4", count=count * 2, offset=pos[0]).reshape((-1, 2))
+            if pairs.size and (np.any(pairs < 0) or np.any(pairs >= self.S * 2)):
+                raise ValueError("turn-restriction arc id out of range")
             self.turns = {(int(a), int(b)) for a, b in pairs}
+        elif pos[0] != len(raw):
+            raise ValueError("unexpected trailing data in graph format v1")
 
     def shape(self, k):
         s, c = self.SST[k], self.SCNT[k]
