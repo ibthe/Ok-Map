@@ -209,8 +209,18 @@ def build(ways, min_component=40, cell=5000, restrictions=()):
     blocked = set()
     for from_way, via_node, to_way, kind in restrictions:
         incoming = by_way_node_in.get((int(from_way), int(via_node)), ())
-        allowed = set(by_way_node_out.get((int(to_way), int(via_node)), ()))
-        if not incoming or not allowed:
+        if not incoming:
+            continue
+        # A same-way U-turn relation refers to the reverse of the incoming segment,
+        # not every outgoing segment that happens to share the same OSM way id.
+        if int(from_way) == int(to_way) and kind == "no_u_turn":
+            blocked.update((ia, ia ^ 1) for ia in incoming)
+            continue
+        if int(from_way) == int(to_way) and kind == "only_u_turn":
+            allowed = {ia ^ 1 for ia in incoming}
+        else:
+            allowed = set(by_way_node_out.get((int(to_way), int(via_node)), ()))
+        if not allowed:
             continue
         if str(kind).startswith("only_"):
             outs = outgoing_at.get(int(via_node), ())
