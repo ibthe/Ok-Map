@@ -391,7 +391,8 @@ def read_pbf(path):
 
     h = H()
     h.apply_file(path, locations=True)
-    print("routable ways:", len(h.ways), "via-node restrictions:", len(h.restrictions),\n          "via-way restrictions detected (not yet encoded):", len(h.via_way_restrictions))
+    print("routable ways:", len(h.ways), "via-node restrictions:", len(h.restrictions),
+          "via-way restrictions detected (not yet encoded):", len(h.via_way_restrictions))
     return h.ways, h.restrictions
 
 
