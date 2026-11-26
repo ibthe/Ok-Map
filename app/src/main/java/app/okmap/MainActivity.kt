@@ -857,7 +857,10 @@ class MainActivity : AppCompatActivity() {
     private val locListener = object : LocationListener {
         override fun onLocationChanged(l: Location) {
             if (isFinishing || isDestroyed) return
-            val first = myLoc == null
+            val previous = myLoc
+            if (previous != null && (l.time < previous.time ||
+                    (l.time == previous.time && l.accuracy >= previous.accuracy))) return
+            val first = previous == null
             myLoc = l
             refreshMe()
             if (isFreshLocation(l)) compass.onLocation(l)
@@ -1703,12 +1706,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun showInfo() {
         val msg = "Экстренные службы: 112 (единый номер).\n\n" +
-            "Карта, поиск и рельеф работают без интернета. GPS тоже работает без сети.\n\n" +
+            "Карта, поиск, спутниковая подложка и рельеф работают без интернета, если соответствующие данные включены в сборку APK. GPS тоже работает без сети.\n\n" +
+            "3D-здания: Меню → Карта → 3D-здания. Объём зависит от высотных тегов OpenStreetMap и виден на масштабе 15+. Это не 3D-рельеф.\n\n" +
             "Горные дороги и перевалы (Омало, Ушгули, Абано и др.) зимой могут быть закрыты — на карте это не отражено. " +
             "Перед выездом уточняйте обстановку на месте.\n\n" +
             "Для долгой записи трека разрешите приложению работу в фоне и не закрывайте уведомление.\n\n" +
-            "Данные: © участники OpenStreetMap (ODbL), схема OpenMapTiles, Natural Earth, рельеф — AWS Terrain Tiles. " +
-            "Данные актуальны на дату сборки APK."
+            "Данные: © участники OpenStreetMap (ODbL), OpenMapTiles, Natural Earth; рельеф — AWS Terrain Tiles; " +
+            "ортофотоснимки — © National Agency of Public Registry of Georgia (NAPR). Данные актуальны на дату сборки APK."
         MaterialAlertDialogBuilder(this).setTitle("Справка").setMessage(msg).setPositiveButton("OK", null).show()
     }
 

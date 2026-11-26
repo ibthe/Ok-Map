@@ -367,7 +367,7 @@ style = {
         # problem can never hide the roads/water/landcover of a tile
         "openmaptiles-labels": {"type": "vector", "url": "__MBTILES_URL__"},
         **({"sat": {"type": "raster", "url": "__SAT_URL__", "tileSize": 256,
-                    "attribution": "Imagery: see the provider of sat.mbtiles"}} if SAT else {}),
+                    "attribution": "Orthophoto: © National Agency of Public Registry of Georgia (NAPR)"}} if SAT else {}),
         "relief": {"type": "raster-dem", "url": "__RELIEF_URL__", "tileSize": 256, "encoding": "terrarium",
                    "attribution": "Terrain: Mapzen/AWS Terrain Tiles (SRTM, ASTER, others)"},
     },
