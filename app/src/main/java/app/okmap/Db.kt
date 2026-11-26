@@ -133,6 +133,8 @@ class PlaceDb(path: String) {
         }
         return out
     }
+
+    fun close() = db.close()
 }
 
 /** Reads ground elevation from the Terrarium tiles bundled in relief.mbtiles. */
@@ -172,5 +174,12 @@ class Elevation(path: String, private val z: Int = 11) {
         val gg = (p shr 8) and 0xFF
         val bb = p and 0xFF
         return Math.round((rr * 256 + gg + bb / 256.0) - 32768.0).toInt()
+    }
+
+    fun close() {
+        db.close()
+        cacheBmp?.recycle()
+        cacheBmp = null
+        cacheKey = ""
     }
 }
