@@ -325,92 +325,92 @@ class Graph(file: File) {
     }
 
     /** Fastest route between two snapped points, or null if they are not connected (one-way streets respected). */
+    private fun forbiddenTurn(inArc: Int, outArc: Int): Boolean =
+        turnRestrictions.contains((inArc.toLong() shl 32) or (outArc.toLong() and 0xffffffffL))
+
+    /** Fastest route using directed-arc states; the incoming road is retained at every junction. */
     fun route(s: Snap, e: Snap, avoidUnpaved: Boolean): List<Leg>? {
         val inf = Double.MAX_VALUE
-        val g = DoubleArray(nodes) { inf }
-        val prevNode = IntArray(nodes) { -1 }
-        val prevSeg = IntArray(nodes) { -1 }
-        val closed = BooleanArray(nodes)
+        val stateCount = segments * 2
+        val g = DoubleArray(stateCount) { inf }
+        val prev = IntArray(stateCount) { -1 }
+        val closed = BooleanArray(stateCount)
         val heap = Heap()
         val vmax = maxKmh / 3.6
-
-        fun h(n: Int) = haversine(nLat(n), nLon(n), e.lat, e.lon) / vmax
-
+        fun h(node: Int) = haversine(nLat(node), nLon(node), e.lat, e.lon) / vmax
         val ks = s.seg
         val ke = e.seg
         val ls = segLen(ks)
         val le = segLen(ke)
-        var best = inf
-        var bestEnd = -1
-        var direct = false
-
         if (ks == ke) {
-            if (e.off >= s.off && canForward(ks)) { best = cost(ks, e.off - s.off, avoidUnpaved); direct = true }
-            else if (e.off < s.off && canBackward(ks)) { best = cost(ks, s.off - e.off, avoidUnpaved); direct = true }
+            if (e.off >= s.off && canForward(ks)) return listOf(Leg(ks, s.off, e.off, -1))
+            if (e.off < s.off && canBackward(ks)) return listOf(Leg(ks, s.off, e.off, -1))
         }
+        fun arcEnd(arc: Int): Int = if ((arc and 1) == 0) segB(arc / 2) else segA(arc / 2)
         if (canBackward(ks)) {
-            val a = segA(ks)
-            g[a] = cost(ks, s.off, avoidUnpaved)
-            heap.push(g[a] + h(a), a)
+            val state = 2 * ks + 1
+            val node = segA(ks)
+            g[state] = cost(ks, s.off, avoidUnpaved)
+            heap.push(g[state] + h(node), state)
         }
         if (canForward(ks)) {
-            val b = segB(ks)
-            val c = cost(ks, ls - s.off, avoidUnpaved)
-            if (c < g[b]) { g[b] = c; heap.push(c + h(b), b) }
+            val state = 2 * ks
+            val node = segB(ks)
+            val c0 = cost(ks, ls - s.off, avoidUnpaved)
+            if (c0 < g[state]) { g[state] = c0; heap.push(c0 + h(node), state) }
         }
-        var endA = inf   // arrive at the end point through node A (travelling A -> B)
-        var endB = inf   // arrive through node B (travelling B -> A)
-        if (canForward(ke)) endA = cost(ke, e.off, avoidUnpaved)
-        if (canBackward(ke)) endB = cost(ke, le - e.off, avoidUnpaved)
-        val nodeEndA = segA(ke)
-        val nodeEndB = segB(ke)
-
+        var best = inf
+        var bestState = -1
+        var bestEndArc = -1
         while (heap.size > 0) {
-            val u = heap.pop()
+            val state = heap.pop()
             if (heap.topKey >= best) break
-            if (closed[u]) continue
-            closed[u] = true
-            if (u == nodeEndA && endA < inf && g[u] + endA < best) { best = g[u] + endA; bestEnd = u; direct = false }
-            if (u == nodeEndB && endB < inf && g[u] + endB < best) { best = g[u] + endB; bestEnd = u; direct = false }
-            val from = adjStart(u)
-            val to = adjStart(u + 1)
-            for (i in from until to) {
+            if (closed[state]) continue
+            closed[state] = true
+            val node = arcEnd(state)
+            if (node == segA(ke) && canForward(ke)) {
+                val endArc = 2 * ke
+                val tail = cost(ke, e.off, avoidUnpaved)
+                if (!forbiddenTurn(state, endArc) && g[state] + tail < best) { best = g[state] + tail; bestState = state; bestEndArc = endArc }
+            }
+            if (node == segB(ke) && canBackward(ke)) {
+                val endArc = 2 * ke + 1
+                val tail = cost(ke, le - e.off, avoidUnpaved)
+                if (!forbiddenTurn(state, endArc) && g[state] + tail < best) { best = g[state] + tail; bestState = state; bestEndArc = endArc }
+            }
+            for (i in adjStart(node) until adjStart(node + 1)) {
                 val k = adj(i)
-                val v: Int
-                if (segA(k) == u && canForward(k)) v = segB(k)
-                else if (segB(k) == u && canBackward(k)) v = segA(k)
+                val outArc: Int
+                val next: Int
+                if (segA(k) == node && canForward(k)) { outArc = 2 * k; next = segB(k) }
+                else if (segB(k) == node && canBackward(k)) { outArc = 2 * k + 1; next = segA(k) }
                 else continue
-                if (closed[v]) continue
-                val c = g[u] + cost(k, segLen(k), avoidUnpaved)
-                if (c < g[v]) {
-                    g[v] = c
-                    prevNode[v] = u
-                    prevSeg[v] = k
-                    heap.push(c + h(v), v)
+                if (forbiddenTurn(state, outArc) || closed[outArc]) continue
+                val candidate = g[state] + cost(k, segLen(k), avoidUnpaved)
+                if (candidate < g[outArc]) {
+                    g[outArc] = candidate
+                    prev[outArc] = state
+                    heap.push(candidate + h(next), outArc)
                 }
             }
         }
-
-        if (direct) return listOf(Leg(ks, s.off, e.off, -1))
-        if (bestEnd < 0) return null
-
+        if (bestState < 0) return null
+        val states = ArrayList<Int>()
+        var state = bestState
+        while (state >= 0) { states.add(state); state = prev[state] }
+        states.reverse()
         val legs = ArrayList<Leg>()
-        // last leg: from the end node to the end point
-        legs.add(if (bestEnd == nodeEndA) Leg(ke, 0.0, e.off, -1) else Leg(ke, le, e.off, -1))
-        var u = bestEnd
-        while (prevNode[u] >= 0) {
-            val k = prevSeg[u]
-            val p = prevNode[u]
-            val l = segLen(k)
-            legs.add(if (segA(k) == p) Leg(k, 0.0, l, u) else Leg(k, l, 0.0, u))
-            u = p
+        val firstArc = states[0]
+        legs.add(if ((firstArc and 1) == 0) Leg(ks, s.off, ls, segB(ks)) else Leg(ks, s.off, 0.0, segA(ks)))
+        for (i in 1 until states.size) {
+            val arc = states[i]
+            val k = arc / 2
+            val len = segLen(k)
+            legs.add(if ((arc and 1) == 0) Leg(k, 0.0, len, segB(k)) else Leg(k, len, 0.0, segA(k)))
         }
-        // first leg: from the start point to the start node u
-        legs.add(if (u == segA(ks)) Leg(ks, s.off, 0.0, u) else Leg(ks, s.off, ls, u))
-        legs.reverse()
+        legs.add(if ((bestEndArc and 1) == 0) Leg(ke, 0.0, e.off, -1) else Leg(ke, le, e.off, -1))
         return legs
     }
-
     // ------------------------------------------------------------------ route geometry + instructions
     private class DList {
         var a = DoubleArray(256)
