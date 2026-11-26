@@ -252,7 +252,7 @@ class MainActivity : AppCompatActivity() {
             File(dir, "relief.mbtiles").takeIf { it.exists() }?.let {
                 elevation = try { Elevation(it.absolutePath) } catch (e: Exception) { errors.add("relief: $e"); null }
             }
-            mapView.getMapAsync { setupMap(it) }
+            mapView.getMapAsync { if (!isFinishing && !isDestroyed) setupMap(it) }
         }
     }
 
@@ -355,7 +355,7 @@ class MainActivity : AppCompatActivity() {
                     if (mb != last) {
                         last = mb
                         val t = if (total > 0) "$mb / ${total shr 20} МБ" else "$mb МБ"
-                        runOnUiThread { loadingText.text = getString(R.string.loading) + "\n$name: $t" }
+                        runOnUiThread { if (!isFinishing && !isDestroyed) loadingText.text = getString(R.string.loading) + "\n$name: $t" }
                     }
                 }
             }
@@ -801,6 +801,7 @@ class MainActivity : AppCompatActivity() {
 
     private val locListener = object : LocationListener {
         override fun onLocationChanged(l: Location) {
+            if (isFinishing || isDestroyed) return
             val first = myLoc == null
             myLoc = l
             refreshMe()
