@@ -26,6 +26,10 @@ on:
         required: false
         default: ""
 
+concurrency:
+  group: ok-map-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
