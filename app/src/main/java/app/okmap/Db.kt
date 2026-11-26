@@ -138,6 +138,7 @@ class PlaceDb(path: String) {
     }
 
     fun close() = synchronized(lock) { db.close() }
+}
 
 /** Reads ground elevation from the Terrarium tiles bundled in relief.mbtiles. */
 class Elevation(path: String, private val z: Int = 11) {
