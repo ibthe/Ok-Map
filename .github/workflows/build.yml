@@ -139,15 +139,13 @@ jobs:
       # Road graph is required for the offline car navigator; failures must fail CI.
       - name: Build offline road graph (car router)
         if: steps.need.outputs.graph == 'true'
-        continue-on-error: true
         run: |
           python -m pip install --quiet osmium numpy
           python tools/test_graph.py
           python tools/build_graph.py data/region.osm.pbf app/src/main/assets/graph.bin
           ls -lh app/src/main/assets/graph.bin
           # smoke test on the real graph: Tbilisi -> Kutaisi by road is roughly 230 km
-          python tools/route_check.py app/src/main/assets/graph.bin 41.7151 44.8271 42.2679 42.7180 190 320 \
-            || echo "::warning::route smoke test Tbilisi-Kutaisi failed"
+          python tools/route_check.py app/src/main/assets/graph.bin 41.7151 44.8271 42.2679 42.7180 190 320
           cp /tmp/graph.stamp app/src/main/assets/graph.stamp
 
       - name: Build relief tiles (hillshade + elevation readout)
