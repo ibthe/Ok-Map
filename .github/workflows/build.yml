@@ -2,7 +2,7 @@ name: Build Ok Map APK
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, feature/offline-navigation]
   workflow_dispatch:
     inputs:
       osm_url:
@@ -136,7 +136,7 @@ jobs:
           python build_places.py ../app/src/main/assets/map.mbtiles ../app/src/main/assets/places.db
           cp /tmp/places.stamp ../app/src/main/assets/places.stamp
 
-      # Road graph for the offline car navigator. If this step fails, the APK is still built (without navigation).
+      # Road graph is required for the offline car navigator; failures must fail CI.
       - name: Build offline road graph (car router)
         if: steps.need.outputs.graph == 'true'
         continue-on-error: true
