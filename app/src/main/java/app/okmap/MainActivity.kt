@@ -848,8 +848,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Approximate-only permission cannot use GPS_PROVIDER. Keep NETWORK_PROVIDER as a valid fallback.
-        val gps = fine && lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
-        val net = (fine || coarse) && lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        val gps = fine && runCatching { lm.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)
+        val net = (fine || coarse) && runCatching { lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(false)
         if (!gps && !net) {
             MaterialAlertDialogBuilder(this)
                 .setMessage("Геолокация выключена. Включите GPS или сетевое определение местоположения в настройках телефона.")
@@ -864,19 +864,19 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        try { lm.removeUpdates(locListener) } catch (_: SecurityException) {}
+        try { lm.removeUpdates(locListener) } catch (_: Exception) {}
         var registered = false
         if (gps) {
             try {
                 lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locListener, Looper.getMainLooper())
                 registered = true
-            } catch (_: SecurityException) {}
+            } catch (_: Exception) {}
         }
         if (net) {
             try {
                 lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 3000L, 0f, locListener, Looper.getMainLooper())
                 registered = true
-            } catch (_: SecurityException) {}
+            } catch (_: Exception) {}
         }
         if (!registered) {
             toast(getString(R.string.no_location))
