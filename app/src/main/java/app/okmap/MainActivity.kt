@@ -90,6 +90,7 @@ class MainActivity : AppCompatActivity() {
     private var searchToken = 0
     private var searchDebounce: Runnable? = null
     private var searchIndexWarned = false
+    private var searchOverlayVisible = false
 
     private var rulerOn = false
     private val rulerPts = ArrayList<LatLng>()
@@ -629,7 +630,7 @@ class MainActivity : AppCompatActivity() {
     /** Ruler bar: shown while there is a ruler. Editing: undo / done / delete. Finished: edit / delete. */
     private fun updateRulerBar() {
         val bar = findViewById<View>(R.id.rulerBar)
-        bar.visibility = if (rulerOn || rulerPts.isNotEmpty()) View.VISIBLE else View.GONE
+        bar.visibility = if (!searchOverlayVisible && (rulerOn || rulerPts.isNotEmpty())) View.VISIBLE else View.GONE
         findViewById<TextView>(R.id.rulerText).text =
             if (rulerPts.size < 2) "Линейка: нажимайте на карту" else "Линейка: " + Geo.fmtDist(Geo.length(rulerPts))
         findViewById<View>(R.id.btnRulerUndo).visibility = if (rulerOn && rulerPts.isNotEmpty()) View.VISIBLE else View.GONE
@@ -676,6 +677,15 @@ class MainActivity : AppCompatActivity() {
 
     // ============================================================ search
 
+    /** Temporarily clears map-only overlays while the full-width search list is open. */
+    private fun setSearchOverlay(visible: Boolean) {
+        searchOverlayVisible = visible
+        findViewById<View>(R.id.tvInfo).visibility = if (visible) View.GONE else View.VISIBLE
+        if (visible) findViewById<View>(R.id.rulerBar).visibility = View.GONE else updateRulerBar()
+        findViewById<View>(R.id.rightControls).visibility =
+            if (visible || compass.isOpen || nav.active) View.GONE else View.VISIBLE
+    }
+
     private fun runSearch(q: String) {
         val query = q.trim()
         val token = ++searchToken
@@ -684,11 +694,13 @@ class MainActivity : AppCompatActivity() {
         if (query.length < 2) {
             searchResults = emptyList()
             lvResults.visibility = View.GONE
+            setSearchOverlay(false)
             return
         }
         val db = placeDb
         if (db == null) {
             lvResults.visibility = View.GONE
+            setSearchOverlay(false)
             if (!searchIndexWarned) {
                 toast("Индекс поиска не найден в APK")
                 searchIndexWarned = true
@@ -698,6 +710,7 @@ class MainActivity : AppCompatActivity() {
 
         // LIKE substring search scans the offline index; keep that work off the UI thread.
         lvResults.visibility = View.GONE
+        setSearchOverlay(false)
         val task = Runnable {
             searchDebounce = null
             searchWorker.execute {
@@ -709,6 +722,7 @@ class MainActivity : AppCompatActivity() {
                         etSearch.text.toString().trim() != query) return@runOnUiThread
                     if (failure != null) {
                         errors.add("search: $failure")
+                        setSearchOverlay(false)
                         if (!searchIndexWarned) {
                             toast("Ошибка поиска: $failure")
                             searchIndexWarned = true
@@ -728,6 +742,7 @@ class MainActivity : AppCompatActivity() {
                         height = minOf((items.size * 64 * density).roundToInt(), dp(320), screenCap)
                     }
                     lvResults.visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
+                    setSearchOverlay(items.isNotEmpty())
                 }
             }
         }
@@ -757,6 +772,7 @@ class MainActivity : AppCompatActivity() {
         }
         map?.easeCamera(CameraUpdateFactory.newLatLngZoom(ll, z), 900)
         lvResults.visibility = View.GONE
+        setSearchOverlay(false)
         etSearch.clearFocus()
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(etSearch.windowToken, 0)
         showPlaceSheet(ll, p.ru.ifBlank { p.en.ifBlank { p.ka } })
@@ -1294,6 +1310,14 @@ class MainActivity : AppCompatActivity() {
     /** Hides the normal map controls while a route is previewed / driven. */
     private fun onNavModeChanged() {
         val navOn = nav.active
+        if (navOn && searchOverlayVisible) {
+            searchToken++
+            searchDebounce?.let { ui.removeCallbacks(it) }
+            searchDebounce = null
+            searchResults = emptyList()
+            lvResults.visibility = View.GONE
+            setSearchOverlay(false)
+        }
         if (navOn && compass.isOpen) { compass.close(); return }     // closing calls this function again
         val cmp = compass.isOpen
         backToStopNav.isEnabled = navOn || cmp
@@ -1303,7 +1327,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.btnFit).visibility = if (navOn) View.GONE else View.VISIBLE
         findViewById<View>(R.id.btnCompass).visibility = if (navOn) View.GONE else View.VISIBLE
         val rc = findViewById<View>(R.id.rightControls)
-        rc.visibility = if (cmp) View.GONE else View.VISIBLE
+        rc.visibility = if (cmp || searchOverlayVisible) View.GONE else View.VISIBLE
         (rc.layoutParams as android.widget.FrameLayout.LayoutParams).bottomMargin = dp(if (navOn) 112 else 88)
         rc.requestLayout()
         if (nav.navigating && !locActive) withLocationPermission { startLocation(false) }
