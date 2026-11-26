@@ -789,7 +789,7 @@ class MainActivity : AppCompatActivity() {
 
     // ============================================================ menu
 
-    // ------------------------------------------------------------------ menu (bottom sheet with 4 categories)
+    // ------------------------------------------------------------------ menu (bottom sheet with 5 focused tabs)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun themeColor(attr: Int): Int {
@@ -1017,7 +1017,7 @@ class MainActivity : AppCompatActivity() {
         // instead of extending underneath the system navigation area.
         val menuScroll = object : android.widget.ScrollView(this) {
             override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-                val cap = minOf(dp(440), (resources.displayMetrics.heightPixels - dp(220)).coerceAtLeast(dp(220)))
+                val cap = minOf(dp(440), (resources.displayMetrics.heightPixels - dp(200)).coerceAtLeast(dp(96)))
                 super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(cap, MeasureSpec.AT_MOST))
             }
         }.apply {
@@ -1304,20 +1304,6 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton(android.R.string.ok, null).show()
     }
 
-    private fun showPoiDialog() {
-        val names = POI_CATS.keys.toList()
-        val cur = (prefs.getStringSet("poi_cats", emptySet()) ?: emptySet()).toMutableSet()
-        val checked = BooleanArray(names.size) { names[it] in cur }
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Показывать на карте (ничего не выбрано — все с 15-го масштаба)")
-            .setMultiChoiceItems(names.toTypedArray(), checked) { _, which, isChecked ->
-                if (isChecked) cur.add(names[which]) else cur.remove(names[which])
-                prefs.edit().putStringSet("poi_cats", HashSet(cur)).apply()
-                style?.let { applyPoiFilter(it) }
-                buildChips()
-            }
-            .setPositiveButton(android.R.string.ok, null).show()
-    }
 
     // ============================================================ waypoints
 
@@ -1643,7 +1629,8 @@ class MainActivity : AppCompatActivity() {
             Triple("🚉", "Вокзалы", "tr:station"), Triple("🚏", "Остановки", "tr:stop"), Triple("✈", "Аэропорты", "tr:air"),
             Triple("🏧", "Банкоматы", "Банки и банкоматы"), Triple("🛒", "Магазины", "Магазины"),
             Triple("💊", "Аптеки", "Аптеки"), Triple("🏥", "Больницы", "Больницы и врачи"),
-            Triple("🏛", "Места", "Достопримечательности"), Triple("🛏", "Ночлег", "Ночлег"), Triple("🚻", "Туалеты", "Туалеты"), Triple("💧", "Вода", "Вода и родники")
+            Triple("🏛", "Места", "Достопримечательности"), Triple("🚨", "Экстренные", "Полиция и экстренные"),
+            Triple("🛏", "Ночлег", "Ночлег"), Triple("🚻", "Туалеты", "Туалеты"), Triple("💧", "Вода", "Вода и родники")
         )
 
         private val POI_CATS: Map<String, List<String>> = linkedMapOf(
