@@ -123,7 +123,6 @@ class MainActivity : AppCompatActivity() {
 
     // ============================================================ lifecycle
 
-    /** "auto" follows the system, "light" / "dark" force the app UI and the map style. */
     /** "light" (day), "dim" (evening: between day and night) or "dark" (night). Old values ("auto") become day. */
     private fun themeMode(): String {
         val m = getSharedPreferences("settings", MODE_PRIVATE).getString("theme_mode", "light")
@@ -136,7 +135,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun isNight(): Boolean = themeMode() != "light"     // evening and night use the dark overlay colours
 
-    /** One of 5 colour themes (UI + map), stored as an id; day/night is chosen separately by [themeMode]. */
     /** Extent of the installed map data (MBTiles "bounds" = west,south,east,north), so "whole map" fits any region. */
     private fun dataBounds(): LatLngBounds {
         val t = tilesFile ?: return DEFAULT_BOUNDS
@@ -666,9 +664,10 @@ class MainActivity : AppCompatActivity() {
         elevation?.at(c.latitude, c.longitude)?.let { sb.append("  ·  ≈ $it м") }
         sb.append("  ·  z").append(String.format(Locale.US, "%.1f", m.cameraPosition.zoom))
         myLoc?.let {
-            sb.append("\nGPS: ±").append(it.accuracy.roundToInt()).append(" м")
+            val source = if (it.provider == LocationManager.GPS_PROVIDER) "GPS" else "Геолокация"
+            sb.append("\n").append(source).append(": ±").append(it.accuracy.roundToInt()).append(" м")
             if (it.hasAltitude()) sb.append(", высота ").append(it.altitude.roundToInt()).append(" м")
-        } ?: run { if (locActive) sb.append("\nGPS: ожидание сигнала…") }
+        } ?: run { if (locActive) sb.append("\nГеолокация: ожидание сигнала…") }
         if (rulerPts.size >= 2) sb.append("\nЛиния: ").append(Geo.fmtDist(Geo.length(rulerPts)))
             .append(" (тап — новая точка)")
         if (TrackService.running) sb.append("\n● REC трек пишется")
