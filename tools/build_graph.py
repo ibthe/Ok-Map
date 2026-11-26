@@ -352,7 +352,8 @@ def read_pbf(path):
         def __init__(self):
             super().__init__()
             self.ways = []
-            self.restrictions = []\n            self.via_way_restrictions = []
+            self.restrictions = []
+            self.via_way_restrictions = []
 
         def way(self, w):
             if "highway" not in w.tags:
