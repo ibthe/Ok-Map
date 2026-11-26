@@ -210,7 +210,7 @@ class MainActivity : AppCompatActivity() {
         updateRecButton()
         if (prefs.getBoolean("reopen_menu", false)) {     // a theme / brightness change recreated the screen: show the menu again
             prefs.edit().putBoolean("reopen_menu", false).apply()
-            ui.postDelayed({ showMenu() }, 300)
+            ui.postDelayed({ if (!isFinishing && !isDestroyed) showMenu() }, 300)
         }
         findViewById<View>(R.id.btnPoint).setOnClickListener {
             val c = map?.cameraPosition?.target
@@ -263,6 +263,11 @@ class MainActivity : AppCompatActivity() {
     override fun onLowMemory() { super.onLowMemory(); mapView.onLowMemory() }
     override fun onDestroy() {
         ui.removeCallbacks(tick)
+        pendingRouteTimeout?.let { ui.removeCallbacks(it) }
+        pendingRouteTimeout = null
+        pendingRoute = null
+        stopLocationUpdates()
+        locActive = false
         searchToken++
         searchDebounce?.let { ui.removeCallbacks(it) }
         searchWorker.shutdownNow()
@@ -802,6 +807,8 @@ class MainActivity : AppCompatActivity() {
             compass.onLocation(l)
             pendingRoute?.let { p ->
                 pendingRoute = null
+                pendingRouteTimeout?.let { ui.removeCallbacks(it) }
+                pendingRouteTimeout = null
                 nav.planTo(p.first.latitude, p.first.longitude, p.second, l.latitude, l.longitude)
             }
             if (nav.navigating) { nav.onLocation(l); updateInfo(); return }
@@ -1335,24 +1342,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var pendingRoute: Pair<LatLng, String>? = null
+    private var pendingRouteTimeout: Runnable? = null
 
     /** Route from the user's own GPS position. Without a fresh fix the app turns GPS on and waits for it. */
     private fun startRoute(to: LatLng, title: String) {
         val me = myLoc
+        pendingRouteTimeout?.let { ui.removeCallbacks(it) }
+        pendingRouteTimeout = null
         if (me != null && System.currentTimeMillis() - me.time < 30_000) {
+            pendingRoute = null
             nav.planTo(to.latitude, to.longitude, title, me.latitude, me.longitude)
             return
         }
         pendingRoute = Pair(to, title)
         Toast.makeText(this, "Определяю ваше местоположение…", Toast.LENGTH_SHORT).show()
         withLocationPermission { startLocation(false) }
-        ui.postDelayed({
-            val p = pendingRoute ?: return@postDelayed
+        val timeout = Runnable {
+            pendingRouteTimeout = null
+            val p = pendingRoute ?: return@Runnable
             pendingRoute = null
             val m = myLoc
             if (m != null) nav.planTo(p.first.latitude, p.first.longitude, p.second, m.latitude, m.longitude)
-            else Toast.makeText(this, "Местоположение не найдено. Включите GPS и выйдите на открытое место", Toast.LENGTH_LONG).show()
-        }, 20_000)
+            else if (!isFinishing && !isDestroyed) Toast.makeText(this, "Местоположение не найдено. Включите GPS и выйдите на открытое место", Toast.LENGTH_LONG).show()
+        }
+        pendingRouteTimeout = timeout
+        ui.postDelayed(timeout, 20_000)
     }
 
     /** Bottom card for a place (search result or long press): where it is, how far, route / compass / save / copy. */
@@ -1466,7 +1480,7 @@ class MainActivity : AppCompatActivity() {
         if (TrackService.running) {
             stopService(Intent(this, TrackService::class.java))
             prefs.edit().putLong("rec_track", 0L).apply()
-            ui.postDelayed({ refreshTrack(); updateInfo() }, 400)
+            ui.postDelayed({ if (!isFinishing && !isDestroyed) { refreshTrack(); updateInfo() } }, 400)
             toast("Запись остановлена")
             return
         }
@@ -1477,7 +1491,7 @@ class MainActivity : AppCompatActivity() {
             prefs.edit().putLong("rec_track", id).apply()
             shownTrackId = id
             ContextCompat.startForegroundService(this, Intent(this, TrackService::class.java))
-            ui.postDelayed({ scheduleTick(); updateInfo() }, 800)
+            ui.postDelayed({ if (!isFinishing && !isDestroyed) { scheduleTick(); updateInfo() } }, 800)
             toast("Запись трека началась")
         }
     }
