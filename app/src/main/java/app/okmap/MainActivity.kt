@@ -487,17 +487,19 @@ class MainActivity : AppCompatActivity() {
         val builder = Style.Builder().fromJson(json)
         for ((id, bmp) in MapIcons.all(this)) builder.withImage(id, bmp)
         m.setStyle(builder) { s ->
-            style = s
-            addOverlays(s)
-            applyLabels(s)
-            applyPoiFilter(s)
-            applyTransport(s)
-            applyRelief(s)
-            refreshWaypoints()
-            refreshTrack()
-            refreshRuler()
-            refreshMe()
-            updateInfo()
+            if (!isFinishing && !isDestroyed) {
+                style = s
+                addOverlays(s)
+                applyLabels(s)
+                applyPoiFilter(s)
+                applyTransport(s)
+                applyRelief(s)
+                refreshWaypoints()
+                refreshTrack()
+                refreshRuler()
+                refreshMe()
+                updateInfo()
+            }
         }
     }
 
