@@ -21,7 +21,7 @@ import sys
 import numpy as np
 
 MAGIC = 0x3247_4B4F  # "OKG2"
-VERSION = 1
+VERSION = 2
 
 # class id (stored in flags bits 2..5), default speed km/h
 CLASSES = {
@@ -98,15 +98,20 @@ def way_name(tags):
     return n or ref
 
 
-def build(ways, min_component=40, cell=5000):
-    """ways: iterable of (tags: dict, nodes: list[(id, lat, lon)]) -> dict of numpy arrays + names"""
+def build(ways, min_component=40, cell=5000, restrictions=()):
+    """Build graph; ways may be (tags,nodes) or (tags,nodes,osm_way_id).
+
+    restrictions contains (from_way_id, via_node_id, to_way_id, restriction_tag) via-node relations.
+    """
     use = {}
     kept = []
-    for tags, nodes in ways:
+    for item in ways:
+        tags, nodes = item[0], item[1]
+        way_id = int(item[2]) if len(item) > 2 else -1
         r = way_rules(tags)
         if not r or len(nodes) < 2:
             continue
-        kept.append((r, way_name(tags), nodes))
+        kept.append((r, way_name(tags), nodes, way_id))
         seen = set()
         for nid, _, _ in nodes:
             use[nid] = use.get(nid, 0) + (2 if nid in seen else 1)
@@ -114,7 +119,7 @@ def build(ways, min_component=40, cell=5000):
 
     node_index, nlat, nlon = {}, [], []
     names, name_idx = [], {}
-    seg = []   # (a, b, len_dm, name, shape_start, shape_cnt, kmh, flags)
+    seg = []   # (..., flags, OSM way id, start OSM node id, end OSM node id)
     shp_lat, shp_lon = [], []
 
     def nidx(nid, la, lo):
@@ -126,7 +131,7 @@ def build(ways, min_component=40, cell=5000):
             nlon.append(round(lo * 1e6))
         return i
 
-    for (cid, speed, flags), name, nodes in kept:
+    for (cid, speed, flags), name, nodes, way_id in kept:
         cuts = [i for i, (nid, _, _) in enumerate(nodes) if i in (0, len(nodes) - 1) or use[nid] >= 2]
         ni = name_idx.get(name, -1)
         if name and ni < 0:
@@ -140,7 +145,8 @@ def build(ways, min_component=40, cell=5000):
                 continue
             length = sum(haversine(p[1], p[2], q[1], q[2]) for p, q in zip(pts, pts[1:]))
             mid = pts[1:-1]
-            seg.append((a, b, int(round(length * 10)), ni, len(shp_lat), len(mid), speed, flags))
+            seg.append((a, b, int(round(length * 10)), ni, len(shp_lat), len(mid), speed, flags,
+                        way_id, int(pts[0][0]), int(pts[-1][0])))
             for _, la, lo in mid:
                 shp_lat.append(round(la * 1e6))
                 shp_lon.append(round(lo * 1e6))
@@ -180,6 +186,37 @@ def build(ways, min_component=40, cell=5000):
     SCNT = np.array([s[5] for s in seg], dtype="<u2")
     KMH = np.array([s[6] for s in seg], dtype="u1")
     FLG = np.array([s[7] for s in seg], dtype="u1")
+
+    # Resolve via-node restrictions to pairs of directed arcs. Arc 2*k is A->B,
+    # arc 2*k+1 is B->A. The router checks the incoming/outgoing arc pair.
+    by_way_node_in, by_way_node_out, outgoing_at = {}, {}, {}
+    for k, s in enumerate(seg):
+        way_id, na, nb, flags = s[8], s[9], s[10], s[7]
+        a, b = int(A[k]), int(B[k])
+        if way_id < 0:
+            continue
+        if flags & F_FWD:
+            by_way_node_in.setdefault((way_id, nb), []).append(2 * k)
+            by_way_node_out.setdefault((way_id, na), []).append(2 * k)
+            outgoing_at.setdefault(na, []).append(2 * k)
+        if flags & F_BACK:
+            by_way_node_in.setdefault((way_id, na), []).append(2 * k + 1)
+            by_way_node_out.setdefault((way_id, nb), []).append(2 * k + 1)
+            outgoing_at.setdefault(nb, []).append(2 * k + 1)
+    blocked = set()
+    for from_way, via_node, to_way, kind in restrictions:
+        incoming = by_way_node_in.get((int(from_way), int(via_node)), ())
+        allowed = set(by_way_node_out.get((int(to_way), int(via_node)), ()))
+        if not incoming or not allowed:
+            continue
+        if str(kind).startswith("only_"):
+            outs = outgoing_at.get(int(via_node), ())
+            for ia in incoming:
+                blocked.update((ia, oa) for oa in outs if oa not in allowed)
+        elif str(kind).startswith("no_"):
+            for ia in incoming:
+                blocked.update((ia, oa) for oa in allowed)
+    turn_restrictions = np.asarray(sorted(blocked), dtype="<i4").reshape((-1, 2)) if blocked else np.empty((0, 2), dtype="<i4")
 
     # adjacency (CSR): every segment is listed under both of its nodes
     deg = np.bincount(np.concatenate([A, B]), minlength=n).astype("<i4")
@@ -228,7 +265,7 @@ def build(ways, min_component=40, cell=5000):
     return dict(nlat=nlat_a, nlon=nlon_a, adj_start=adj_start, adj=adj, A=A, B=B, LEN=LEN, NAME=NAME, SST=SST,
                 KMH=KMH, FLG=FLG, SCNT=SCNT, shp_lat=shp_lat_a, shp_lon=shp_lon_a, name_off=name_off,
                 name_bytes=b"".join(name_bytes), names=len(names), lat0=lat0, lon0=lon0, cell=cell, W=W, H=H,
-                cell_start=cell_start, cell_data=cell_data)
+                cell_start=cell_start, cell_data=cell_data, turn_restrictions=turn_restrictions)
 
 
 def pad4(b):
@@ -252,6 +289,9 @@ def write(g, path):
         f.write(pad4(g["name_bytes"]))
         f.write(g["cell_start"].tobytes())
         f.write(g["cell_data"].tobytes())
+        turns = g.get("turn_restrictions", np.empty((0, 2), dtype="<i4"))
+        f.write(struct.pack("<i", len(turns)))
+        f.write(turns.astype("<i4", copy=False).tobytes())
     print(f"graph: {N} nodes, {S} segments, {P} shape points, {g['names']} names, grid {g['W']}x{g['H']}")
 
 
@@ -262,6 +302,7 @@ def read_pbf(path):
         def __init__(self):
             super().__init__()
             self.ways = []
+            self.restrictions = []
 
         def way(self, w):
             if "highway" not in w.tags:
@@ -275,15 +316,25 @@ def read_pbf(path):
                 nodes = [(n.ref, n.lat, n.lon) for n in w.nodes]
             except osmium.InvalidLocationError:
                 return
-            self.ways.append((tags, nodes))
+            self.ways.append((tags, nodes, int(w.id)))
+
+        def relation(self, r):
+            tags = {t.k: t.v for t in r.tags}
+            kind = tags.get("restriction", "")
+            if tags.get("type") != "restriction" or not (kind.startswith("no_") or kind.startswith("only_")):
+                return
+            members = {(m.role, m.type): int(m.ref) for m in r.members if m.type in ("w", "n") and m.role in ("from", "via", "to")}
+            if all((role, typ) in members for role, typ in (("from", "w"), ("via", "n"), ("to", "w"))):
+                self.restrictions.append((members[("from", "w")], members[("via", "n")], members[("to", "w")], kind))
 
     h = H()
     h.apply_file(path, locations=True)
-    print("routable ways:", len(h.ways))
-    return h.ways
+    print("routable ways:", len(h.ways), "via-node restrictions:", len(h.restrictions))
+    return h.ways, h.restrictions
 
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         sys.exit(__doc__)
-    write(build(read_pbf(sys.argv[1])), sys.argv[2])
+    ways, restrictions = read_pbf(sys.argv[1])
+    write(build(ways, restrictions=restrictions), sys.argv[2])
