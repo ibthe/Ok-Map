@@ -1001,7 +1001,7 @@ class MainActivity : AppCompatActivity() {
         }.apply {
             isFillViewport = true
             clipToPadding = false
-            addView(content, android.widget.ScrollView.LayoutParams(
+            addView(content, android.view.ViewGroup.LayoutParams(
                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                 android.view.ViewGroup.LayoutParams.WRAP_CONTENT
             ))
