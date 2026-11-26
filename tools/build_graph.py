@@ -37,6 +37,24 @@ F_FWD, F_BACK, F_ROUNDABOUT, F_UNPAVED = 1, 2, 64, 128   # class id occupies bit
 UNPAVED = {"unpaved", "gravel", "dirt", "ground", "sand", "grass", "mud", "compacted", "fine_gravel", "earth", "pebblestone"}
 DENY = {"no", "private", "customers", "agricultural", "forestry", "military"}
 NO_TURN_RESTRICTIONS = {"no_left_turn", "no_right_turn", "no_u_turn", "no_straight_on"}
+ONLY_TURN_RESTRICTIONS = {"only_left_turn", "only_right_turn", "only_u_turn", "only_straight_on"}
+
+
+def car_restriction_kind(tags):
+    """Return a supported restriction applying to cars, or None.
+
+    OSM's 'except' list can explicitly exempt motorcars / motor vehicles.
+    A generic restriction is used only when no car-specific value overrides it.
+    """
+    if tags.get("type") != "restriction":
+        return None
+    except_modes = {v.strip().lower() for v in re.split(r"[;,]", tags.get("except", "")) if v.strip()}
+    if except_modes.intersection({"motorcar", "motor_vehicle", "vehicle"}):
+        return None
+    kind = (tags.get("restriction:motorcar")
+            or tags.get("restriction:motor_vehicle")
+            or tags.get("restriction", ""))
+    return kind if kind in NO_TURN_RESTRICTIONS or kind in ONLY_TURN_RESTRICTIONS else None
 
 
 def haversine(la1, lo1, la2, lo2):
@@ -334,8 +352,8 @@ def read_pbf(path):
 
         def relation(self, r):
             tags = {t.k: t.v for t in r.tags}
-            kind = tags.get("restriction:motorcar") or tags.get("restriction:motor_vehicle") or tags.get("restriction", "")
-            if tags.get("type") != "restriction" or not (kind in NO_TURN_RESTRICTIONS or kind.startswith("only_")):
+            kind = car_restriction_kind(tags)
+            if kind is None:
                 return
             members = {(m.role, m.type): int(m.ref) for m in r.members if m.type in ("w", "n") and m.role in ("from", "via", "to")}
             if all((role, typ) in members for role, typ in (("from", "w"), ("via", "n"), ("to", "w"))):
