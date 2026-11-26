@@ -728,36 +728,58 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("MissingPermission")
     private fun startLocation(userRequested: Boolean) {
         val lm = getSystemService(LOCATION_SERVICE) as LocationManager
-        val gps = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
-        val net = lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        locActive = false
+        if (!fine && !coarse) {
+            toast(getString(R.string.no_location))
+            return
+        }
+
+        // Approximate-only permission cannot use GPS_PROVIDER. Keep NETWORK_PROVIDER as a valid fallback.
+        val gps = fine && lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
+        val net = (fine || coarse) && lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
         if (!gps && !net) {
             MaterialAlertDialogBuilder(this)
-                .setMessage("Геолокация выключена. Включите GPS в настройках телефона.")
+                .setMessage("Геолокация выключена. Включите GPS или сетевое определение местоположения в настройках телефона.")
                 .setPositiveButton("Настройки") { _, _ -> startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }
                 .setNegativeButton("Отмена", null).show()
             return
         }
-        locActive = true
         if (userRequested) {
             following = true
             myLoc?.let {
                 map?.easeCamera(CameraUpdateFactory.newLatLngZoom(LatLng(it.latitude, it.longitude), 15.0), 600)
             }
         }
-        var last: Location? = null
-        try {
-            lm.removeUpdates(locListener)
-            if (gps) lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locListener, Looper.getMainLooper())
-            if (net) lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 3000L, 0f, locListener, Looper.getMainLooper())
-            if (myLoc == null) {
-                last = (if (gps) lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) else null)
-                    ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-                    ?: lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
-            }
-        } catch (e: SecurityException) {
-            toast(getString(R.string.no_location))
+
+        try { lm.removeUpdates(locListener) } catch (_: SecurityException) {}
+        var registered = false
+        if (gps) {
+            try {
+                lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locListener, Looper.getMainLooper())
+                registered = true
+            } catch (_: SecurityException) {}
         }
-        last?.let { locListener.onLocationChanged(it) }
+        if (net) {
+            try {
+                lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 3000L, 0f, locListener, Looper.getMainLooper())
+                registered = true
+            } catch (_: SecurityException) {}
+        }
+        if (!registered) {
+            toast(getString(R.string.no_location))
+            return
+        }
+        locActive = true
+
+        if (myLoc == null) {
+            fun lastKnown(provider: String): Location? = try { lm.getLastKnownLocation(provider) } catch (_: Exception) { null }
+            val last = (if (gps) lastKnown(LocationManager.GPS_PROVIDER) else null)
+                ?: (if (net) lastKnown(LocationManager.NETWORK_PROVIDER) else null)
+                ?: lastKnown(LocationManager.PASSIVE_PROVIDER)
+            last?.let { locListener.onLocationChanged(it) }
+        }
         updateInfo()
     }
 
