@@ -13,11 +13,29 @@ on:
         description: "Optional: direct URL of a raster satellite imagery .mbtiles (leave empty for the stylised satellite view)"
         required: false
         default: ""
+      sat_tiles:
+        description: "Satellite imagery XYZ tile URL (empty = NAPR orthophoto of Georgia, none = no imagery)"
+        required: false
+        default: ""
+      sat_zoom:
+        description: "Max zoom of the imagery for the whole country (empty = 12; each level is about 3-4x bigger)"
+        required: false
+        default: ""
+      sat_detail:
+        description: "Extra high-zoom areas separated by spaces: west,south,east,north,zoom (empty = Tbilisi z16, none = no extra areas)"
+        required: false
+        default: ""
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
+    env:
+      # Satellite imagery: by default the orthophoto 2016-2017 of the National Agency of Public Registry of Georgia (NAPR).
+      # Put "none" into sat_tiles when starting the workflow by hand to build without imagery.
+      SAT_TILES: ${{ inputs.sat_tiles || 'https://nt0.napr.gov.ge/NGCache?x={x}&y={y}&z={z}&l=ORTHO_GEORGIA_4' }}
+      SAT_ZOOM: ${{ inputs.sat_zoom || '12' }}
+      SAT_DETAIL: ${{ inputs.sat_detail || '44.70,41.62,44.95,41.80,16' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -47,6 +65,8 @@ jobs:
             app/src/main/assets/graph.stamp
             app/src/main/assets/contours.mbtiles
             app/src/main/assets/contours.stamp
+            app/src/main/assets/sat.mbtiles
+            app/src/main/assets/sat.stamp
           # build_places.py / reference_places.json are NOT in the key: they only rebuild the search index
           # (see "Decide what has to be rebuilt"), the 30-60 min tile build stays cached
           key: mapdata-v3-${{ hashFiles('tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py', 'tools/build_relief.py') }}
@@ -72,6 +92,9 @@ jobs:
           CH=$(cat tools/build_contours.py | sha1sum | cut -d' ' -f1)
           echo "$CH" > /tmp/contours.stamp
           [ "$(cat app/src/main/assets/contours.stamp 2>/dev/null)" = "$CH" ] || echo "contours=true" >> "$GITHUB_OUTPUT"
+          SH=$(printf '%s|%s|%s|%s' "$(cat tools/build_satellite.py | sha1sum)" "$SAT_TILES" "$SAT_ZOOM" "$SAT_DETAIL" | sha1sum | cut -d' ' -f1)
+          echo "$SH" > /tmp/sat.stamp
+          [ "$SAT_TILES" != "none" ] && { [ -s app/src/main/assets/sat.mbtiles ] || echo "sat=true" >> "$GITHUB_OUTPUT"; [ "$(cat app/src/main/assets/sat.stamp 2>/dev/null)" = "$SH" ] || echo "sat=true" >> "$GITHUB_OUTPUT"; }
           [ -s app/src/main/assets/relief.mbtiles ] || echo "relief=true" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
           ls -lh app/src/main/assets || true
@@ -143,6 +166,19 @@ jobs:
           python tools/build_contours.py app/src/main/assets/relief.mbtiles app/src/main/assets/contours.mbtiles
           ls -lh app/src/main/assets/contours.mbtiles
           cp /tmp/contours.stamp app/src/main/assets/contours.stamp
+
+      # Satellite imagery (NAPR orthophoto by default). Cached; rebuilt when the source, zoom or areas change.
+      # If the server is unreachable the APK is still built (with the stylised satellite view).
+      - name: Build satellite imagery from XYZ tiles
+        if: env.SAT_TILES != 'none' && steps.need.outputs.sat == 'true'
+        continue-on-error: true
+        run: |
+          python -m pip install --quiet pillow
+          DETAIL="$SAT_DETAIL"; [ "$DETAIL" = "none" ] && DETAIL=""
+          # shellcheck disable=SC2086
+          python tools/build_satellite.py app/src/main/assets/map.mbtiles app/src/main/assets/sat.mbtiles "$SAT_TILES" "$SAT_ZOOM" 10 $DETAIL
+          ls -lh app/src/main/assets/sat.mbtiles
+          cp /tmp/sat.stamp app/src/main/assets/sat.stamp
 
       - name: Build label fonts (Latin + Cyrillic + Georgian)
         run: |

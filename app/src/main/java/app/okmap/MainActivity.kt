@@ -346,6 +346,11 @@ class MainActivity : AppCompatActivity() {
         loadStyle()
     }
 
+    private fun mbtilesMinZoom(f: File): Int = try {
+        val db = SQLiteDatabase.openDatabase(f.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
+        db.use { d -> d.rawQuery("select value from metadata where name='minzoom'", null).use { c -> if (c.moveToFirst()) c.getString(0).toInt() else 0 } }
+    } catch (e: Exception) { 0 }
+
     private fun mapType(): String = prefs.getString("map_type", "scheme") ?: "scheme"
 
     /** "Высоты": contour lines (if contours.mbtiles exists) with labels on every 5th line, and all peaks / spot heights switched on. */
@@ -411,16 +416,16 @@ class MainActivity : AppCompatActivity() {
         val src = obj.getJSONArray("layers")
         val dst = JSONArray()
         val hasImagery = sat && imagery.exists()
+        val imageryMinZoom = if (hasImagery) mbtilesMinZoom(imagery) else 0
         for (i in 0 until src.length()) {
             val l = src.getJSONObject(i)
             val id = l.optString("id")
             if (id == "relief-hillshade" && !relief.exists()) continue
             if (id == "sat-imagery" && !hasImagery) continue
-            // with real imagery the flat land / water fills would cover it: hide them, keep lines, icons and labels
-            if (hasImagery && (l.optString("type") == "fill" || l.optString("type") == "background")) {
-                val lay = l.optJSONObject("layout") ?: JSONObject().also { l.put("layout", it) }
-                lay.put("visibility", "none")
-            }
+            if (id == "sat-imagery") l.put("minzoom", imageryMinZoom)
+            // with real imagery the flat land / water fills would cover it: they stay only below the imagery's first zoom
+            if (hasImagery && (l.optString("type") == "fill" || l.optString("type") == "background"))
+                l.put("maxzoom", minOf(l.optDouble("maxzoom", 24.0), imageryMinZoom.toDouble()))
             dst.put(l)
         }
         if (topo) addElevationMode(obj, dst)
@@ -455,16 +460,18 @@ class MainActivity : AppCompatActivity() {
         val simple = prefs.getBoolean("labels_simple", false)
         for (layer in s.layers) {
             if (layer is SymbolLayer && layer.id.startsWith("lbl-")) {
+                // spot heights and summits belong to the elevation map type only
+                val vis = if (layer.id == "lbl-peak" && mapType() != "topo") Property.NONE else Property.VISIBLE
                 if (simple) {
                     layer.setProperties(
-                        PropertyFactory.visibility(Property.VISIBLE),
+                        PropertyFactory.visibility(vis),
                         PropertyFactory.textField(Expression.raw("[\"to-string\",[\"get\",\"name\"]]"))
                     )
                 } else if (langs.isEmpty()) {
                     layer.setProperties(PropertyFactory.visibility(Property.NONE))
                 } else {
                     layer.setProperties(
-                        PropertyFactory.visibility(Property.VISIBLE),
+                        PropertyFactory.visibility(vis),
                         PropertyFactory.textField(LabelExpr.build(langs, layer.id))
                     )
                 }
@@ -959,7 +966,7 @@ class MainActivity : AppCompatActivity() {
                         "Включайте, только если пропали названия на карте") { on ->
                         prefs.edit().putBoolean("labels_simple", on).apply(); style?.let { applyLabels(it) }
                     }, true)
-                    content.addView(note("Данные карты © участники OpenStreetMap (лицензия ODbL). Ok Map работает без интернета."))
+                    content.addView(note("Данные карты © участники OpenStreetMap (лицензия ODbL). Ортофото (режим «Спутник») © Национальное агентство публичного реестра Грузии. Ok Map работает без интернета."))
                 }
             }
         }
@@ -976,8 +983,6 @@ class MainActivity : AppCompatActivity() {
                 imageTintList = resources.getColorStateList(R.color.chip_text, theme)
                 scaleType = ImageView.ScaleType.CENTER
                 background = Skin.chip(this@MainActivity, 1f)
-                Skin.shape(this, false, 18f, 1f)
-                elevation = dp(2).toFloat()
                 stateListAnimator = android.animation.AnimatorInflater.loadStateListAnimator(this@MainActivity, R.animator.press)
                 isClickable = true
                 isFocusable = true
@@ -1000,17 +1005,23 @@ class MainActivity : AppCompatActivity() {
         sheet.show()
     }
 
-    private fun uiOpacity(): Float = prefs.getFloat("ui_opacity", 0.92f)
+    private fun uiOpacity(): Float = (uiOpacityPercent() / 100f)
+
+    /** 35..100 in steps of 5 (a Slider crashes if its value is not valueFrom + n * stepSize) */
+    private fun uiOpacityPercent(): Int {
+        val pct = Math.round(prefs.getFloat("ui_opacity", 0.90f) * 100f / 5f) * 5
+        return pct.coerceIn(35, 100)
+    }
 
     /** Panel transparency: only the fill fades, the outline and the key edges stay, so panels stay visible over the map. */
     private fun opacityControl(): View {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(20), 0, 0) }
-        val title = label("Прозрачность панелей: ${(uiOpacity() * 100).roundToInt()}%", 14f, R.attr.gTextSecondary, true).apply { setPadding(dp(4), 0, 0, 0) }
+        val title = label("Прозрачность панелей: ${uiOpacityPercent()}%", 14f, R.attr.gTextSecondary, true).apply { setPadding(dp(4), 0, 0, 0) }
         val sl = com.google.android.material.slider.Slider(this).apply {
-            valueFrom = 0.35f; valueTo = 1f; stepSize = 0.05f; value = uiOpacity().coerceIn(0.35f, 1f)
+            valueFrom = 35f; valueTo = 100f; stepSize = 5f; value = uiOpacityPercent().toFloat()
             addOnChangeListener { _, v, fromUser ->
-                title.text = "Прозрачность панелей: ${(v * 100).roundToInt()}%"
-                if (fromUser) { prefs.edit().putFloat("ui_opacity", v).apply(); applyOpacity() }   // live preview behind the sheet
+                title.text = "Прозрачность панелей: ${v.roundToInt()}%"
+                if (fromUser) { prefs.edit().putFloat("ui_opacity", v / 100f).apply(); applyOpacity() }   // live preview behind the sheet
             }
         }
         box.addView(title)
