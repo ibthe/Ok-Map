@@ -60,10 +60,12 @@ def restriction_graph(kind, with_bypass=True):
     ways = [
         ({"highway": "residential"}, [west, center], 10),
         ({"highway": "residential"}, [center, north], 20),
-        ({"highway": "residential"}, [center, east], 30),
     ]
     if with_bypass:
-        ways.append(({"highway": "residential"}, [east, north], 40))
+        ways.extend([
+            ({"highway": "residential"}, [center, east], 30),
+            ({"highway": "residential"}, [east, north], 40),
+        ])
     g = bg.build(ways, min_component=1,
                  restrictions=[(10, ids["center"], 20, kind)])
     path = os.path.join(tempfile.mkdtemp(), "turns.bin")
