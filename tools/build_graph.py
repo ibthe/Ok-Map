@@ -57,6 +57,24 @@ def car_restriction_kind(tags):
     return kind if kind in NO_TURN_RESTRICTIONS or kind in ONLY_TURN_RESTRICTIONS else None
 
 
+def parse_via_way_members(members):
+    """Parse an ordered OSM restriction member list containing one or more via-ways.
+
+    members is an iterable of (role, member_type, ref) triples in relation order.
+    Mixed via-node/via-way relations are deliberately rejected until their topology
+    can be resolved without guessing.
+    """
+    from_ways = [int(ref) for role, typ, ref in members if role == "from" and typ == "w"]
+    to_ways = [int(ref) for role, typ, ref in members if role == "to" and typ == "w"]
+    via_members = [(typ, int(ref)) for role, typ, ref in members if role == "via"]
+    if len(from_ways) != 1 or len(to_ways) != 1 or not via_members:
+        return None
+    if any(typ != "w" for typ, _ in via_members):
+        return None
+    # A relation may list multiple via ways. Their order is semantically significant.
+    return (from_ways[0], tuple(ref for _, ref in via_members), to_ways[0])
+
+
 def haversine(la1, lo1, la2, lo2):
     p = math.pi / 180
     a = math.sin((la2 - la1) * p / 2) ** 2 + math.cos(la1 * p) * math.cos(la2 * p) * math.sin((lo2 - lo1) * p / 2) ** 2
@@ -334,7 +352,7 @@ def read_pbf(path):
         def __init__(self):
             super().__init__()
             self.ways = []
-            self.restrictions = []
+            self.restrictions = []\n            self.via_way_restrictions = []
 
         def way(self, w):
             if "highway" not in w.tags:
@@ -355,13 +373,24 @@ def read_pbf(path):
             kind = car_restriction_kind(tags)
             if kind is None:
                 return
-            members = {(m.role, m.type): int(m.ref) for m in r.members if m.type in ("w", "n") and m.role in ("from", "via", "to")}
-            if all((role, typ) in members for role, typ in (("from", "w"), ("via", "n"), ("to", "w"))):
-                self.restrictions.append((members[("from", "w")], members[("via", "n")], members[("to", "w")], kind))
+            ordered = [(m.role, m.type, int(m.ref)) for m in r.members
+                       if m.role in ("from", "via", "to") and m.type in ("w", "n")]
+            parsed_via = parse_via_way_members(ordered)
+            if parsed_via is not None:
+                self.via_way_restrictions.append((*parsed_via, kind))
+                return
+            # Existing via-node relations remain supported. Do not reinterpret mixed
+            # or malformed via-way relations as node restrictions.
+            via_nodes = [ref for role, typ, ref in ordered if role == "via" and typ == "n"]
+            from_ways = [ref for role, typ, ref in ordered if role == "from" and typ == "w"]
+            to_ways = [ref for role, typ, ref in ordered if role == "to" and typ == "w"]
+            if len(from_ways) == 1 and len(via_nodes) == 1 and len(to_ways) == 1:
+                if not any(role == "via" and typ == "w" for role, typ, _ in ordered):
+                    self.restrictions.append((from_ways[0], via_nodes[0], to_ways[0], kind))
 
     h = H()
     h.apply_file(path, locations=True)
-    print("routable ways:", len(h.ways), "via-node restrictions:", len(h.restrictions))
+    print("routable ways:", len(h.ways), "via-node restrictions:", len(h.restrictions),\n          "via-way restrictions detected (not yet encoded):", len(h.via_way_restrictions))
     return h.ways, h.restrictions
 
 
