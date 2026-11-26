@@ -103,6 +103,8 @@ def build(ways, min_component=40, cell=5000, restrictions=()):
 
     restrictions contains (from_way_id, via_node_id, to_way_id, restriction_tag) via-node relations.
     """
+    restrictions = list(restrictions)
+    restriction_via_nodes = {int(r[1]) for r in restrictions}
     use = {}
     kept = []
     for item in ways:
@@ -132,7 +134,8 @@ def build(ways, min_component=40, cell=5000, restrictions=()):
         return i
 
     for (cid, speed, flags), name, nodes, way_id in kept:
-        cuts = [i for i, (nid, _, _) in enumerate(nodes) if i in (0, len(nodes) - 1) or use[nid] >= 2]
+        cuts = [i for i, (nid, _, _) in enumerate(nodes)
+                if i in (0, len(nodes) - 1) or use[nid] >= 2 or nid in restriction_via_nodes]
         ni = name_idx.get(name, -1)
         if name and ni < 0:
             ni = name_idx[name] = len(names)
