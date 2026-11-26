@@ -23,7 +23,7 @@ class Graph:
     def __init__(self, path):
         raw = open(path, "rb").read()
         h = struct.unpack_from("<20i", raw, 0)
-        (_, _, self.N, self.S, self.P, self.Aj, self.M, self.NB, self.maxkmh,
+        (_, self.version, self.N, self.S, self.P, self.Aj, self.M, self.NB, self.maxkmh,
          self.lat0, self.lon0, self.cell, self.W, self.H, self.CD) = h[:15]
         pos = [80]
 
@@ -42,7 +42,14 @@ class Graph:
         self.name_bytes = raw[pos[0]:pos[0] + self.NB]
         pos[0] += self.NB + (-self.NB) % 4
         self.cell_start, self.cell_data = take("<i4", self.W * self.H + 1), take("<i4", self.CD)
-        assert pos[0] + self.CD * 4 - self.CD * 4 <= len(raw)
+        self.turns = set()
+        if self.version >= 2 and pos[0] + 4 <= len(raw):
+            count = struct.unpack_from("<i", raw, pos[0])[0]
+            pos[0] += 4
+            if count < 0 or pos[0] + count * 8 > len(raw):
+                raise ValueError("invalid turn-restriction section")
+            pairs = np.frombuffer(raw, dtype="<i4", count=count * 2, offset=pos[0]).reshape((-1, 2))
+            self.turns = {(int(a), int(b)) for a, b in pairs}
 
     def shape(self, k):
         s, c = self.SST[k], self.SCNT[k]
@@ -82,91 +89,92 @@ class Graph:
         return meters / (self.KMH[k] / 3.6) * mult
 
     def route(self, s, e):
-        """s, e = snap results (d, seg, offset_m). Returns (time_s, [(seg, forward)]) or None"""
+        """Arc-state A*: turn restrictions are checked on (incoming_arc, outgoing_arc)."""
         _, ks, os_ = s
         _, ke, oe = e
-        el, eo = self.nlat, self.nlon
-        tgt = (self.nlat[self.A[ke]], self.nlon[self.A[ke]])
-        elat, elon = None, None
-        pts = self.shape(ke)
-        # end point coordinates for the heuristic
-        acc, cur = 0.0, pts[0]
-        for p, q in zip(pts, pts[1:]):
-            L = hav(p[0], p[1], q[0], q[1])
-            if acc + L >= oe or q is pts[-1]:
-                t = 0 if L == 0 else max(0.0, min(1.0, (oe - acc) / L))
-                elat, elon = p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t
-                break
-            acc += L
-        vmax = self.maxkmh / 3.6
+        Lk, Le = self.LEN[ks] / 10.0, self.LEN[ke] / 10.0
         INF = float("inf")
-        g = {}
-        prev = {}
-        heap = []
-        Lk = self.LEN[ks] / 10.0
-        fl = self.FLG[ks]
-        starts = []
-        if fl & 2:
-            starts.append((self.A[ks], self.cost(ks, os_), (ks, False, os_, 0.0)))
-        if fl & 1:
-            starts.append((self.B[ks], self.cost(ks, Lk - os_), (ks, True, os_, Lk)))
-        best, best_end = INF, None
         if ks == ke:
-            if oe >= os_ and fl & 1:
-                best, best_end = self.cost(ks, oe - os_), ("direct",)
-            elif oe < os_ and fl & 2:
-                best, best_end = self.cost(ks, os_ - oe), ("direct",)
+            if oe >= os_ and self.FLG[ks] & 1:
+                return self.cost(ks, oe - os_), [(ks, True)]
+            if oe < os_ and self.FLG[ks] & 2:
+                return self.cost(ks, os_ - oe), [(ks, False)]
 
-        def h(n):
-            return hav(self.nlat[n] / 1e6, self.nlon[n] / 1e6, elat, elon) / vmax
-        for n, c, via in starts:
-            g[int(n)] = c
-            prev[int(n)] = (None, via)
-            heapq.heappush(heap, (c + h(n), int(n)))
-        Le = self.LEN[ke] / 10.0
-        fe = self.FLG[ke]
-        ends = {}
-        if fe & 1:
-            ends[int(self.A[ke])] = self.cost(ke, oe)
-        if fe & 2:
-            ends[int(self.B[ke])] = self.cost(ke, Le - oe)
+        def arc_end(arc):
+            k = arc // 2
+            return int(self.B[k] if arc % 2 == 0 else self.A[k])
+
+        pts = self.shape(ke)
+        acc, elat, elon = 0.0, pts[0][0], pts[0][1]
+        for p, q in zip(pts, pts[1:]):
+            seg_len = hav(p[0], p[1], q[0], q[1])
+            if acc + seg_len >= oe or q == pts[-1]:
+                t = 0.0 if seg_len == 0 else max(0.0, min(1.0, (oe - acc) / seg_len))
+                elat = p[0] + (q[0] - p[0]) * t
+                elon = p[1] + (q[1] - p[1]) * t
+                break
+            acc += seg_len
+        vmax = max(5, self.maxkmh) / 3.6
+
+        def heuristic(node):
+            return hav(self.nlat[node] / 1e6, self.nlon[node] / 1e6, elat, elon) / vmax
+
+        dist, prev, heap = {}, {}, []
+        starts = []
+        if self.FLG[ks] & 2:
+            starts.append((2 * ks + 1, self.cost(ks, os_)))
+        if self.FLG[ks] & 1:
+            starts.append((2 * ks, self.cost(ks, Lk - os_)))
+        for arc, cost in starts:
+            if cost < dist.get(arc, INF):
+                dist[arc] = cost
+                prev[arc] = None
+                heapq.heappush(heap, (cost + heuristic(arc_end(arc)), arc))
+
+        best, best_state, best_end_arc = INF, None, None
         done = set()
         while heap:
-            f, u = heapq.heappop(heap)
-            if u in done:
+            estimate, state = heapq.heappop(heap)
+            if state in done:
                 continue
-            if f >= best:
+            if estimate >= best:
                 break
-            done.add(u)
-            if u in ends and g[u] + ends[u] < best:
-                best, best_end = g[u] + ends[u], u
-            for k in self.adj[self.adj_start[u]:self.adj_start[u + 1]]:
-                fl = self.FLG[k]
-                if self.A[k] == u and fl & 1:
-                    v, fwd = int(self.B[k]), True
-                elif self.B[k] == u and fl & 2:
-                    v, fwd = int(self.A[k]), False
+            done.add(state)
+            node = arc_end(state)
+            end_options = []
+            if node == int(self.A[ke]) and self.FLG[ke] & 1:
+                end_options.append((2 * ke, self.cost(ke, oe)))
+            if node == int(self.B[ke]) and self.FLG[ke] & 2:
+                end_options.append((2 * ke + 1, self.cost(ke, Le - oe)))
+            for end_arc, tail_cost in end_options:
+                if (state, end_arc) not in self.turns and dist[state] + tail_cost < best:
+                    best, best_state, best_end_arc = dist[state] + tail_cost, state, end_arc
+
+            for k in self.adj[self.adj_start[node]:self.adj_start[node + 1]]:
+                if self.A[k] == node and self.FLG[k] & 1:
+                    out_arc, nxt = 2 * int(k), int(self.B[k])
+                elif self.B[k] == node and self.FLG[k] & 2:
+                    out_arc, nxt = 2 * int(k) + 1, int(self.A[k])
                 else:
                     continue
-                c = g[u] + self.cost(k, self.LEN[k] / 10.0)
-                if c < g.get(v, INF):
-                    g[v] = c
-                    prev[v] = (u, (int(k), fwd, 0.0, 0.0))
-                    heapq.heappush(heap, (c + h(v), v))
-        if best_end is None:
-            return None
-        legs = []
-        if best_end == ("direct",):
-            return best, [(ks, oe >= os_)]
-        u = best_end
-        legs.append((ke, u == int(self.A[ke])))
-        while u is not None:
-            p, via = prev[u]
-            legs.append((via[0], via[1]))
-            u = p
-        legs.reverse()
-        return best, legs
+                if (state, out_arc) in self.turns or out_arc in done:
+                    continue
+                candidate = dist[state] + self.cost(int(k), self.LEN[k] / 10.0)
+                if candidate < dist.get(out_arc, INF):
+                    dist[out_arc] = candidate
+                    prev[out_arc] = state
+                    heapq.heappush(heap, (candidate + heuristic(nxt), out_arc))
 
+        if best_state is None:
+            return None
+        arcs, state = [], best_state
+        while state is not None:
+            arcs.append(state)
+            state = prev[state]
+        arcs.reverse()
+        legs = [(arc // 2, arc % 2 == 0) for arc in arcs]
+        legs.append((best_end_arc // 2, best_end_arc % 2 == 0))
+        return best, legs
     def dist(self, legs):
         return sum(self.LEN[k] / 10.0 for k, _ in legs)
 
