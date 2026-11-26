@@ -6,3 +6,7 @@ local.properties
 data/
 app/src/main/assets/map.mbtiles
 app/src/main/assets/glyphs/
+# Local editor and Python runtime artifacts
+.DS_Store
+__pycache__/
+*.py[cod]
