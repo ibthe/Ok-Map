@@ -912,7 +912,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(8), dp(16), dp(24))
         }
-        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; minimumHeight = dp(340) }
+        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val hasRelief = File(filesDir, "relief.mbtiles").exists()
 
         fun add(v: View, last: Boolean = false) { content.addView(v); if (!last) content.addView(divider()) }
@@ -935,8 +935,8 @@ class MainActivity : AppCompatActivity() {
                     add(menuRow("Перейти к координатам", null, null, act { gotoCoordinatesDialog() }), true)
                     content.addView(note("АЗС, еда, вокзалы, остановки и другие места включаются кнопками над картой."))
                 }
-                1 -> {   // NAVIGATION: routes, voice, compass
-                    add(menuRow("Маршрут к перекрестию", null, "От вашего местоположения до точки в центре экрана", act {
+                1 -> {   // NAVIGATION: routes and driving preferences
+                    add(menuRow("Маршрут к центру карты", null, "От вашего местоположения до выбранной точки", act {
                         map?.cameraPosition?.target?.let { startRoute(it, "Точка на карте") }
                     }))
                     add(menuSwitch("Голосовые подсказки", prefs.getBoolean("nav_voice", true), true,
@@ -945,12 +945,7 @@ class MainActivity : AppCompatActivity() {
                         "Ехать по асфальту, если есть выбор") { on -> prefs.edit().putBoolean("nav_avoid_unpaved", on).apply() }, true)
                     content.addView(note("Чтобы проложить маршрут к месту: найдите его в поиске или нажмите на карту и выберите «Маршрут»."))
                 }
-                2 -> {   // MY PLACES: points, tracks, files
-                    add(menuSwitch("Запись трека", TrackService.running, true,
-                        "Записывает ваш путь по GPS (даже при выключенном экране)") { on ->
-                        if (on != TrackService.running) toggleRecording()
-                        content.postDelayed({ if (content.isAttachedToWindow) page(2) }, 900)
-                    })
+                2 -> {   // MY PLACES: points, tracks, files; recording is available from the persistent map dock
                     add(menuRow("Мои точки", "${userDb.waypoints().size}", null, act { showWaypoints() }))
                     add(menuRow("Мои треки", "${userDb.tracks().size}", "Записанные пути", act { showTracks() }))
                     add(menuRow("Экспорт GPX", null, "Сохранить точки и треки в файл", act {
@@ -996,7 +991,24 @@ class MainActivity : AppCompatActivity() {
         root.addView(tabRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             .apply { bottomMargin = dp(14) })
         root.addView(heading)
-        root.addView(content)
+        // Keep every menu item reachable on compact screens; a long page scrolls inside the sheet
+        // instead of extending underneath the system navigation area.
+        val menuScroll = object : android.widget.ScrollView(this) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                val cap = minOf(dp(440), (resources.displayMetrics.heightPixels - dp(220)).coerceAtLeast(dp(220)))
+                super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(cap, MeasureSpec.AT_MOST))
+            }
+        }.apply {
+            isFillViewport = true
+            clipToPadding = false
+            addView(content, android.widget.ScrollView.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+        }
+        root.addView(menuScroll, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
         sheet.setContentView(root)
         styleSheet(sheet)
         sheet.behavior.skipCollapsed = true
