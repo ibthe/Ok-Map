@@ -86,6 +86,10 @@ only_graph, only_start, only_target, only_data = restriction_graph("only_straigh
 assert only_data["turn_restrictions"].shape[0] >= 1
 only_route = only_graph.route(only_start, only_target)
 assert only_route is not None, "only_* should preserve the allowed target way"
+# Directly leaving toward east is forbidden; the route must use the permitted north branch first.
+only_east = only_graph.snap(41.70, 44.815)
+only_detour = only_graph.route(only_start, only_east)
+assert only_detour is not None and len(only_detour[1]) >= 3, ("only_* turn was not enforced", only_detour)
 
 blocked_graph, blocked_start, blocked_target, _ = restriction_graph("no_left_turn", False)
 assert blocked_graph.route(blocked_start, blocked_target) is None, "route should fail when the only turn is prohibited"
