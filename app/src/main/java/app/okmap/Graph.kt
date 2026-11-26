@@ -105,6 +105,10 @@ class Graph(file: File) {
         gw = buf.getInt(48)
         gh = buf.getInt(52)
         cellDataLen = buf.getInt(56)
+        require(nodes > 0 && segments > 0 && shapePts >= 0 && adjLen >= 0 &&
+            nameCount >= 0 && nameBytes >= 0 && cell > 0 && gw > 0 && gh > 0 &&
+            cellDataLen >= 0 && segments <= Int.MAX_VALUE / 2 &&
+            gw.toLong() * gh.toLong() < Int.MAX_VALUE / 4) { "graph.bin: invalid header dimensions" }
 
         fun pad4(v: Int) = v + ((4 - v % 4) % 4)
         var p = 80
@@ -126,16 +130,25 @@ class Graph(file: File) {
         oNameBytes = p; p += pad4(nameBytes)
         oCellStart = p; p += 4 * (gw * gh + 1)
         oCellData = p
-        if (formatVersion >= 2) {
-            val turnOffset = oCellData + 4 * cellDataLen
-            require(turnOffset + 4 <= buf.limit()) { "graph.bin: missing turn section" }
+        val baseEndLong = oCellData.toLong() + 4L * cellDataLen
+        require(baseEndLong >= oCellData.toLong() && baseEndLong <= buf.limit().toLong()) {
+            "graph.bin: truncated cell index"
+        }
+        if (formatVersion == 1) {
+            require(baseEndLong == buf.limit().toLong()) { "graph.bin: unexpected trailing data in v1" }
+        } else {
+            require(baseEndLong + 4L <= buf.limit().toLong()) { "graph.bin: missing turn section" }
+            val turnOffset = baseEndLong.toInt()
             val count = buf.getInt(turnOffset)
-            require(count >= 0 && turnOffset.toLong() + 4L + count.toLong() * 8L <= buf.limit().toLong()) { "graph.bin: invalid turn section" }
+            val endLong = turnOffset.toLong() + 4L + count.toLong() * 8L
+            require(count >= 0 && endLong == buf.limit().toLong()) { "graph.bin: invalid turn section size" }
             var q = turnOffset + 4
             repeat(count) {
                 val incoming = buf.getInt(q); q += 4
                 val outgoing = buf.getInt(q); q += 4
-                require(incoming >= 0 && incoming < segments * 2 && outgoing >= 0 && outgoing < segments * 2) { "graph.bin: invalid directed arc" }
+                require(incoming >= 0 && incoming < segments * 2 && outgoing >= 0 && outgoing < segments * 2) {
+                    "graph.bin: invalid directed arc"
+                }
                 turnRestrictions.add((incoming.toLong() shl 32) or (outgoing.toLong() and 0xffffffffL))
             }
         }
