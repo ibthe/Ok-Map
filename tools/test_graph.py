@@ -95,3 +95,19 @@ blocked_graph, blocked_start, blocked_target, _ = restriction_graph("no_left_tur
 assert blocked_graph.route(blocked_start, blocked_target) is None, "route should fail when the only turn is prohibited"
 print("via-node turn restriction tests passed")
 
+
+# A no_u_turn relation may use the same OSM way as both from and to. The via node
+# must split that way, and only the reverse arc must be prohibited (not straight-on travel).
+uturn_nodes = [(2001, 41.72, 44.80), (2002, 41.72, 44.81), (2003, 41.72, 44.82)]
+uturn_data = bg.build([({"highway": "residential"}, uturn_nodes, 77)], min_component=1,
+                     restrictions=[(77, 2002, 77, "no_u_turn")])
+assert uturn_data["A"].size == 2, uturn_data["A"].size
+assert uturn_data["turn_restrictions"].shape[0] == 1, uturn_data["turn_restrictions"]
+uturn_path = os.path.join(tempfile.mkdtemp(), "uturn.bin")
+bg.write(uturn_data, uturn_path)
+uturn_graph = rc.Graph(uturn_path)
+uturn_start = uturn_graph.snap(41.72, 44.805)
+uturn_target = uturn_graph.snap(41.72, 44.815)
+uturn_route = uturn_graph.route(uturn_start, uturn_target)
+assert uturn_route is not None and len(uturn_route[1]) == 2, ("no_u_turn blocked straight travel", uturn_route)
+print("same-way no_u_turn test passed")
