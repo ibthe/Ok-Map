@@ -102,7 +102,7 @@ uturn_nodes = [(2001, 41.72, 44.80), (2002, 41.72, 44.81), (2003, 41.72, 44.82)]
 uturn_data = bg.build([({"highway": "residential"}, uturn_nodes, 77)], min_component=1,
                      restrictions=[(77, 2002, 77, "no_u_turn")])
 assert uturn_data["A"].size == 2, uturn_data["A"].size
-assert uturn_data["turn_restrictions"].shape[0] == 1, uturn_data["turn_restrictions"]
+assert uturn_data["turn_restrictions"].shape[0] == 2, uturn_data["turn_restrictions"]
 uturn_path = os.path.join(tempfile.mkdtemp(), "uturn.bin")
 bg.write(uturn_data, uturn_path)
 uturn_graph = rc.Graph(uturn_path)
