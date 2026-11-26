@@ -127,7 +127,7 @@ class PlaceDb(path: String) {
         db.rawQuery(
             "select ka,ru,en,kind,lat,lon,ifnull(ele,0) from places where s like ? " +
                 "order by case when s like ? or s like ? then 0 else 1 end, prio, length(s) limit $limit",
-            arrayOf("%$q%", "$q%", "%\\n$q%")
+            arrayOf("%$q%", "$q%", "%\n$q%")
         ).use { c ->
             while (c.moveToNext()) {
                 out.add(Place(c.getString(0) ?: "", c.getString(1) ?: "", c.getString(2) ?: "",
