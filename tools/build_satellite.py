@@ -113,7 +113,8 @@ def main(map_path, out_path, template, max_zoom=12, min_zoom=0, details=()):
                 db.commit()
                 print(f"  {ok} tiles, {size / 1e6:.0f} MB")
     for k, v in {"name": "satellite", "format": fmt, "minzoom": str(min_zoom), "maxzoom": str(top),
-                 "bounds": f"{w},{s},{e},{n}", "type": "baselayer",\n                 "attribution": "© National Agency of Public Registry of Georgia (NAPR)"}.items():
+                 "bounds": f"{w},{s},{e},{n}", "type": "baselayer",
+                 "attribution": "© National Agency of Public Registry of Georgia (NAPR)"}.items():
         db.execute("insert into metadata values (?,?)", (k, v))
     db.commit()
     db.close()
