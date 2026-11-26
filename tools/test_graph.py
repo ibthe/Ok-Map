@@ -144,3 +144,20 @@ try:
 except ValueError:
     pass
 print("OSM car-exception and graph-format validation tests passed")
+
+
+# Via-way relation parsing preserves the ordered via-way chain and rejects ambiguous
+# mixed via-node/via-way relations rather than silently degrading them to via-node.
+assert bg.parse_via_way_members([
+    ("from", "w", 100), ("via", "w", 200), ("via", "w", 300), ("to", "w", 400)
+]) == (100, (200, 300), 400)
+assert bg.parse_via_way_members([
+    ("from", "w", 100), ("via", "n", 250), ("via", "w", 300), ("to", "w", 400)
+]) is None
+assert bg.parse_via_way_members([
+    ("from", "w", 100), ("via", "w", 200), ("to", "w", 400), ("to", "w", 401)
+]) is None
+assert bg.parse_via_way_members([
+    ("from", "w", 100), ("to", "w", 400)
+]) is None
+print("ordered via-way relation parsing tests passed")
