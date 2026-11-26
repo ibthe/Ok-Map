@@ -51,6 +51,7 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.FillExtrusionLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
@@ -489,6 +490,8 @@ class MainActivity : AppCompatActivity() {
         m.setStyle(builder) { s ->
             if (!isFinishing && !isDestroyed) {
                 style = s
+                apply3dBuildings(s)
+                if (prefs.getBoolean("map_3d", false) && !nav.active) set3dCamera(true)
                 addOverlays(s)
                 applyLabels(s)
                 applyPoiFilter(s)
@@ -534,6 +537,49 @@ class MainActivity : AppCompatActivity() {
         s.getLayer("relief-hillshade")?.setProperties(
             PropertyFactory.visibility(if (on) Property.VISIBLE else Property.NONE)
         )
+    }
+
+    /** Adds offline 3D building extrusions from the OpenMapTiles building layer. */
+    private fun apply3dBuildings(s: Style) {
+        val id = "building-3d"
+        if (!prefs.getBoolean("map_3d", false)) {
+            if (s.getLayer(id) != null) s.removeLayer(id)
+            return
+        }
+        if (s.getLayer(id) != null || s.getSource("openmaptiles") == null) return
+
+        val layer = FillExtrusionLayer(id, "openmaptiles").apply {
+            sourceLayer = "building"
+            minZoom = 15f
+            setFilter(Expression.all(
+                Expression.has("render_height"),
+                Expression.has("render_min_height")
+            ))
+            setProperties(
+                PropertyFactory.fillExtrusionColor(
+                    Color.parseColor(if (isNight()) "#687482" else "#C8BDAE")
+                ),
+                PropertyFactory.fillExtrusionHeight(Expression.get("render_height")),
+                PropertyFactory.fillExtrusionBase(Expression.get("render_min_height")),
+                PropertyFactory.fillExtrusionOpacity(0.94f),
+                PropertyFactory.fillExtrusionVerticalGradient(true)
+            )
+        }
+        if (s.getLayer("building-outline") != null) s.addLayerAbove(layer, "building-outline")
+        else s.addLayer(layer)
+    }
+
+    private fun set3dCamera(enabled: Boolean) {
+        val m = map ?: return
+        val current = m.cameraPosition
+        val target = current.target ?: return
+        val camera = CameraPosition.Builder()
+            .target(target)
+            .zoom(if (enabled) maxOf(current.zoom, 15.5) else current.zoom)
+            .bearing(current.bearing)
+            .tilt(if (enabled) 55.0 else 0.0)
+            .build()
+        m.easeCamera(CameraUpdateFactory.newCameraPosition(camera), 750)
     }
 
     private fun applyPoiFilter(s: Style) {
@@ -984,7 +1030,7 @@ class MainActivity : AppCompatActivity() {
         return row
     }
 
-    /** Scheme / Satellite / Elevation. Satellite = stylised natural-colour relief map (real imagery if sat.mbtiles is installed); Elevation = contour lines + all spot heights. */
+    /** Scheme / Satellite / Elevation. Satellite uses offline orthophoto tiles when bundled; Elevation = contour lines + all spot heights. */
     private fun mapTypeSwitch(): View {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(4), 0, dp(12)) }
         val g = com.google.android.material.button.MaterialButtonToggleGroup(this).apply { isSingleSelection = true; isSelectionRequired = true }
@@ -1058,6 +1104,12 @@ class MainActivity : AppCompatActivity() {
                 0 -> {   // MAP: what is drawn
                     val langs = enabledLanguages().joinToString(" ") { it.name }
                     add(mapTypeSwitch())
+                    add(menuSwitch("3D-здания", prefs.getBoolean("map_3d", false), true,
+                        "Объёмные здания по данным OSM; масштаб 15+") { on ->
+                        prefs.edit().putBoolean("map_3d", on).apply()
+                        style?.let { apply3dBuildings(it) }
+                        set3dCamera(on)
+                    })
                     add(menuRow("Языки названий", langs, null, act { showLanguageDialog() }))
                     add(menuSwitch("Рельеф", prefs.getBoolean("relief_on", true) && hasRelief, hasRelief,
                         if (hasRelief) "Тени гор на карте" else "Нет данных рельефа") { on ->
@@ -1348,6 +1400,7 @@ class MainActivity : AppCompatActivity() {
         (rc.layoutParams as android.widget.FrameLayout.LayoutParams).bottomMargin = dp(if (navOn) 112 else 88)
         rc.requestLayout()
         if (nav.navigating && !locActive) withLocationPermission { startLocation(false) }
+        if (!navOn && prefs.getBoolean("map_3d", false) && !isFinishing && !isDestroyed) set3dCamera(true)
         updateInfo()
     }
 
