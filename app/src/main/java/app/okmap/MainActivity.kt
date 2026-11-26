@@ -1380,11 +1380,12 @@ class MainActivity : AppCompatActivity() {
             return
         }
         withLocationPermission {
+            startLocation(false)
+            if (!locActive) return@withLocationPermission
             val id = userDb.newTrack("Трек " + SimpleDateFormat("dd.MM HH:mm", Locale.getDefault()).format(Date()))
             prefs.edit().putLong("rec_track", id).apply()
             shownTrackId = id
             ContextCompat.startForegroundService(this, Intent(this, TrackService::class.java))
-            startLocation(false)
             ui.postDelayed({ scheduleTick(); updateInfo() }, 800)
             toast("Запись трека началась")
         }
