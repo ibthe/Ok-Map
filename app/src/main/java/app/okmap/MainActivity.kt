@@ -283,18 +283,45 @@ class MainActivity : AppCompatActivity() {
         }
         val todo = DATA_FILES.filter { it in have }
         for (n in DATA_FILES) if (n !in have) File(filesDir, n).delete()
+
+        // The build embeds per-file hashes. Code-only APK updates no longer copy hundreds of MB again.
+        val hashes = try {
+            assets.open("data.version").bufferedReader().useLines { lines ->
+                lines.mapNotNull { line ->
+                    val split = line.indexOf('=')
+                    if (split <= 0) null else line.substring(0, split) to line.substring(split + 1)
+                }.toMap()
+            }
+        } catch (_: Exception) { emptyMap() }
+        val useHashes = hashes.isNotEmpty() && todo.all { hashes[it] != null }
         val version = BuildConfig.VERSION_CODE
-        val ready = todo.all { File(filesDir, it).exists() } && prefs.getInt("data_version", -1) == version
-        if (ready) { onReady(); return }
+        val toCopy = if (useHashes) {
+            todo.filter { name ->
+                !File(filesDir, name).exists() || prefs.getString("asset_hash_$name", null) != hashes[name]
+            }
+        } else {
+            if (todo.all { File(filesDir, it).exists() } && prefs.getInt("data_version", -1) == version) emptyList()
+            else todo
+        }
+        if (toCopy.isEmpty()) { onReady(); return }
 
         loading.visibility = View.VISIBLE
         thread(name = "data-copy") {
             try {
-                for (name in todo) copyAsset(name)
-                prefs.edit().putInt("data_version", version).apply()
-                runOnUiThread { loading.visibility = View.GONE; onReady() }
+                for (name in toCopy) copyAsset(name)
+                val editor = prefs.edit()
+                if (useHashes) toCopy.forEach { editor.putString("asset_hash_$it", hashes[it]) }
+                else editor.putInt("data_version", version)
+                editor.apply()
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    loading.visibility = View.GONE
+                    onReady()
+                }
             } catch (e: Exception) {
-                runOnUiThread { loadingText.text = "Ошибка: ${e.message}" }
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) loadingText.text = "Ошибка: ${e.message}"
+                }
             }
         }
     }
