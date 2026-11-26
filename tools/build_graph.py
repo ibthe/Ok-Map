@@ -36,6 +36,7 @@ CLASSES = {
 F_FWD, F_BACK, F_ROUNDABOUT, F_UNPAVED = 1, 2, 64, 128   # class id occupies bits 2..5
 UNPAVED = {"unpaved", "gravel", "dirt", "ground", "sand", "grass", "mud", "compacted", "fine_gravel", "earth", "pebblestone"}
 DENY = {"no", "private", "customers", "agricultural", "forestry", "military"}
+NO_TURN_RESTRICTIONS = {"no_left_turn", "no_right_turn", "no_u_turn", "no_straight_on"}
 
 
 def haversine(la1, lo1, la2, lo2):
@@ -333,8 +334,8 @@ def read_pbf(path):
 
         def relation(self, r):
             tags = {t.k: t.v for t in r.tags}
-            kind = tags.get("restriction", "")
-            if tags.get("type") != "restriction" or not (kind.startswith("no_") or kind.startswith("only_")):
+            kind = tags.get("restriction:motorcar") or tags.get("restriction:motor_vehicle") or tags.get("restriction", "")
+            if tags.get("type") != "restriction" or not (kind in NO_TURN_RESTRICTIONS or kind.startswith("only_")):
                 return
             members = {(m.role, m.type): int(m.ref) for m in r.members if m.type in ("w", "n") and m.role in ("from", "via", "to")}
             if all((role, typ) in members for role, typ in (("from", "w"), ("via", "n"), ("to", "w"))):
