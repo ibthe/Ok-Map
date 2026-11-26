@@ -18,7 +18,7 @@ import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 
-/** Foreground service that records a GPS track into the database while the screen is off. */
+/** Foreground service that records a location track into the database while the screen is off. */
 class TrackService : Service() {
 
     companion object {
@@ -59,7 +59,7 @@ class TrackService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val n: Notification = NotificationCompat.Builder(this, CHANNEL)
-            .setContentTitle("Запись GPS-трека")
+            .setContentTitle("Запись трека")
             .setContentText("Ok Map записывает маршрут")
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
@@ -112,7 +112,9 @@ class TrackService : Service() {
     }
 
     override fun onDestroy() {
-        try { lm?.removeUpdates(listener) } catch (_: SecurityException) {}
+        try { lm?.removeUpdates(listener) } catch (_: Exception) {}
+        try { db?.close() } catch (_: Exception) {}
+        db = null
         running = false
         super.onDestroy()
     }
