@@ -565,7 +565,8 @@ class MainActivity : AppCompatActivity() {
                 PropertyFactory.fillExtrusionVerticalGradient(true)
             )
         }
-        if (s.getLayer("building-outline") != null) s.addLayerAbove(layer, "building-outline")
+        // Keep the thin outline above the extrusion so roof/building edges remain legible.
+        if (s.getLayer("building") != null) s.addLayerAbove(layer, "building")
         else s.addLayer(layer)
     }
 
