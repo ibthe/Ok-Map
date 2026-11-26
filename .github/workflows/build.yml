@@ -223,7 +223,7 @@ jobs:
             file="app/src/main/assets/$name"
             if [ -s "$file" ]; then
               hash="$(sha256sum "$file" | cut -d' ' -f1)"
-              printf '%s=%s\\n' "$name" "$hash" >> app/src/main/assets/data.version
+              printf '%s=%s\n' "$name" "$hash" >> app/src/main/assets/data.version
             fi
           done
           cat app/src/main/assets/data.version
