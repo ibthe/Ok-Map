@@ -114,28 +114,30 @@ class PlaceDb(path: String) {
                      val lat: Double, val lon: Double, val ele: Int)
 
     private val db = SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.OPEN_READONLY)
+    private val lock = Any()
 
-    fun count(): Int = db.rawQuery("select count(*) from places", null).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+    fun count(): Int = synchronized(lock) {
+        db.rawQuery("select count(*) from places", null).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+    }
 
-    fun search(query: String, limit: Int = 40): List<Place> {
+    fun search(query: String, limit: Int = 40): List<Place> = synchronized(lock) {
         val q = query.trim().lowercase().replace("%", "").replace("_", "")
-        if (q.isEmpty()) return emptyList()
+        if (q.isEmpty()) return@synchronized emptyList()
         val out = ArrayList<Place>()
         db.rawQuery(
             "select ka,ru,en,kind,lat,lon,ifnull(ele,0) from places where s like ? " +
                 "order by case when s like ? or s like ? then 0 else 1 end, prio, length(s) limit $limit",
-            arrayOf("%$q%", "$q%", "%\n$q%")
+            arrayOf("%$q%", "$q%", "%\\n$q%")
         ).use { c ->
             while (c.moveToNext()) {
                 out.add(Place(c.getString(0) ?: "", c.getString(1) ?: "", c.getString(2) ?: "",
                     c.getString(3) ?: "", c.getDouble(4), c.getDouble(5), c.getInt(6)))
             }
         }
-        return out
+        out
     }
 
-    fun close() = db.close()
-}
+    fun close() = synchronized(lock) { db.close() }
 
 /** Reads ground elevation from the Terrarium tiles bundled in relief.mbtiles. */
 class Elevation(path: String, private val z: Int = 11) {
