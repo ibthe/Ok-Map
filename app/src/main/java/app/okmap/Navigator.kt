@@ -69,6 +69,7 @@ class Navigator(
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var pendingSpeech: String? = null
+    @Volatile private var disposed = false
 
     val active: Boolean get() = state != State.IDLE
     val navigating: Boolean get() = state == State.NAV
@@ -133,6 +134,7 @@ class Navigator(
 
     // ------------------------------------------------------------------ planning
     fun planTo(lat: Double, lon: Double, title: String, fromLat: Double, fromLon: Double, silent: Boolean = false) {
+        if (disposed) return
         val f = graphFile()
         if (f == null) {
             toast("Нет данных дорог: в приложении не найден graph.bin")
@@ -166,6 +168,7 @@ class Navigator(
             }
             act.runOnUiThread {
                 busy = false
+                if (disposed || act.isFinishing || act.isDestroyed) return@runOnUiThread
                 if (silent && !navigating) return@runOnUiThread        // navigation was ended while rerouting
                 val r = result
                 if (error != null || r == null) { toast(error ?: "Маршрут не найден"); return@runOnUiThread }
@@ -419,9 +422,11 @@ class Navigator(
     }
 
     private fun initTts() {
-        if (tts != null) return
+        if (disposed || tts != null) return
         tts = TextToSpeech(act) { status ->
-            if (status == TextToSpeech.SUCCESS) {
+            if (disposed || act.isFinishing || act.isDestroyed) {
+                tts?.shutdown(); tts = null
+            } else if (status == TextToSpeech.SUCCESS) {
                 val res = tts?.setLanguage(Locale("ru", "RU"))
                 ttsReady = res != null && res >= TextToSpeech.LANG_AVAILABLE
                 tts?.setAudioAttributes(AudioAttributes.Builder()
@@ -435,12 +440,17 @@ class Navigator(
     }
 
     private fun speak(text: String) {
-        if (!prefs.getBoolean("nav_voice", true)) return
+        if (disposed || !prefs.getBoolean("nav_voice", true)) return
         if (ttsReady) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "nav") else pendingSpeech = text
     }
 
     fun shutdown() {
-        tts?.shutdown(); tts = null
+        if (disposed) return
+        disposed = true
+        if (active) stop() // the Activity owns route progress; never leave an orphaned foreground navigation service
+        tts?.stop(); tts?.shutdown(); tts = null
+        ttsReady = false
+        pendingSpeech = null
     }
 
     private fun toast(s: String) = Toast.makeText(act, s, Toast.LENGTH_SHORT).show()
