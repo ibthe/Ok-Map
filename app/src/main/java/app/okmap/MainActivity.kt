@@ -569,13 +569,13 @@ class MainActivity : AppCompatActivity() {
         else s.addLayer(layer)
     }
 
-    private fun set3dCamera(enabled: Boolean) {
+    private fun set3dCamera(enabled: Boolean, zoomToBuildings: Boolean = false) {
         val m = map ?: return
         val current = m.cameraPosition
         val target = current.target ?: return
         val camera = CameraPosition.Builder()
             .target(target)
-            .zoom(if (enabled) maxOf(current.zoom, 15.5) else current.zoom)
+            .zoom(if (enabled && zoomToBuildings) maxOf(current.zoom, 15.5) else current.zoom)
             .bearing(current.bearing)
             .tilt(if (enabled) 55.0 else 0.0)
             .build()
@@ -1108,7 +1108,7 @@ class MainActivity : AppCompatActivity() {
                         "Объёмные здания по данным OSM; масштаб 15+") { on ->
                         prefs.edit().putBoolean("map_3d", on).apply()
                         style?.let { apply3dBuildings(it) }
-                        set3dCamera(on)
+                        set3dCamera(on, zoomToBuildings = on)
                     })
                     add(menuRow("Языки названий", langs, null, act { showLanguageDialog() }))
                     add(menuSwitch("Рельеф", prefs.getBoolean("relief_on", true) && hasRelief, hasRelief,
