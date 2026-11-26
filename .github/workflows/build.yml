@@ -103,6 +103,11 @@ jobs:
           cat "$GITHUB_OUTPUT"
           ls -lh app/src/main/assets || true
 
+      - name: Run synthetic road graph tests
+        run: |
+          python -m pip install --quiet numpy
+          python tools/test_graph.py
+
       - name: Download OSM extract of Georgia (Geofabrik)
         if: steps.need.outputs.tiles == 'true' || steps.need.outputs.graph == 'true'
         env:
@@ -145,7 +150,6 @@ jobs:
         if: steps.need.outputs.graph == 'true'
         run: |
           python -m pip install --quiet osmium numpy
-          python tools/test_graph.py
           python tools/build_graph.py data/region.osm.pbf app/src/main/assets/graph.bin
           ls -lh app/src/main/assets/graph.bin
           # smoke test on the real graph: Tbilisi -> Kutaisi by road is roughly 230 km
