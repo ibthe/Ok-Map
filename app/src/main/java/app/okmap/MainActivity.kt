@@ -1359,7 +1359,7 @@ class MainActivity : AppCompatActivity() {
         val me = myLoc
         pendingRouteTimeout?.let { ui.removeCallbacks(it) }
         pendingRouteTimeout = null
-        if (isFreshLocation(me)) {
+        if (me != null && isFreshLocation(me)) {
             pendingRoute = null
             nav.planTo(to.latitude, to.longitude, title, me.latitude, me.longitude)
             return
@@ -1371,8 +1371,8 @@ class MainActivity : AppCompatActivity() {
             pendingRouteTimeout = null
             val p = pendingRoute ?: return@Runnable
             pendingRoute = null
-            val m = myLoc
-            if (isFreshLocation(m)) nav.planTo(p.first.latitude, p.first.longitude, p.second, m!!.latitude, m.longitude)
+            val m = myLoc?.takeIf { isFreshLocation(it) }
+            if (m != null) nav.planTo(p.first.latitude, p.first.longitude, p.second, m.latitude, m.longitude)
             else if (!isFinishing && !isDestroyed) Toast.makeText(this, "Свежая геопозиция не получена. Включите GPS и выйдите на открытое место", Toast.LENGTH_LONG).show()
         }
         pendingRouteTimeout = timeout
