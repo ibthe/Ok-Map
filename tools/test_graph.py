@@ -45,3 +45,47 @@ assert G.dist(legs2) > 6 * 0.002 * 111320 * 0.7478 * 1.2, "went against the one-
 # 12 streets x 11 blocks + 11 public avenues x 11 blocks; the private avenue and the tiny island are dropped
 assert G.S == 12 * 11 + 11 * 11, G.S
 print("graph tests passed:", round(d), "m,", round(t), "s")
+
+# Via-node turn restrictions: the fastest west->north movement is prohibited, so the
+# router must retain the incoming directed arc and take the east-side bypass.
+def restriction_graph(kind, with_bypass=True):
+    ids = {}
+    def pt(name, lat, lon):
+        ids[name] = len(ids) + 1000
+        return (ids[name], lat, lon)
+    west = pt("west", 41.70, 44.80)
+    center = pt("center", 41.70, 44.81)
+    north = pt("north", 41.71, 44.81)
+    east = pt("east", 41.70, 44.82)
+    ways = [
+        ({"highway": "residential"}, [west, center], 10),
+        ({"highway": "residential"}, [center, north], 20),
+        ({"highway": "residential"}, [center, east], 30),
+    ]
+    if with_bypass:
+        ways.append(({"highway": "residential"}, [east, north], 40))
+    g = bg.build(ways, min_component=1,
+                 restrictions=[(10, ids["center"], 20, kind)])
+    path = os.path.join(tempfile.mkdtemp(), "turns.bin")
+    bg.write(g, path)
+    graph = rc.Graph(path)
+    start = graph.snap(41.70, 44.805)
+    target = graph.snap(41.705, 44.81)
+    return graph, start, target, g
+
+
+no_graph, no_start, no_target, no_data = restriction_graph("no_left_turn", True)
+assert no_data["turn_restrictions"].shape[0] == 1, no_data["turn_restrictions"]
+no_route = no_graph.route(no_start, no_target)
+assert no_route is not None, "no_left_turn should use the available bypass"
+assert len(no_route[1]) >= 3, ("router ignored no_left_turn", no_route[1])
+
+only_graph, only_start, only_target, only_data = restriction_graph("only_straight_on", True)
+assert only_data["turn_restrictions"].shape[0] >= 1
+only_route = only_graph.route(only_start, only_target)
+assert only_route is not None, "only_* should preserve the allowed target way"
+
+blocked_graph, blocked_start, blocked_target, _ = restriction_graph("no_left_turn", False)
+assert blocked_graph.route(blocked_start, blocked_target) is None, "route should fail when the only turn is prohibited"
+print("via-node turn restriction tests passed")
+
