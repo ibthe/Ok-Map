@@ -83,27 +83,22 @@ class TrackService : Service() {
         val coarse = checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
         val gps = fine && manager.isProviderEnabled(LocationManager.GPS_PROVIDER)
         val net = (fine || coarse) && manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
-        if (!gps && !net) {
+        // Record from one provider only; mixing GPS and network fixes creates doubled, jagged tracks.
+        val provider = when {
+            gps -> LocationManager.GPS_PROVIDER
+            net -> LocationManager.NETWORK_PROVIDER
+            else -> null
+        }
+        if (provider == null) {
             stopSelf()
             return START_NOT_STICKY
         }
 
         try { manager.removeUpdates(listener) } catch (_: SecurityException) {}
         running = false
-        var registered = false
-        if (gps) {
-            try {
-                manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 3000L, 5f, listener, Looper.getMainLooper())
-                registered = true
-            } catch (_: SecurityException) {}
-        }
-        if (net) {
-            try {
-                manager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 3000L, 5f, listener, Looper.getMainLooper())
-                registered = true
-            } catch (_: SecurityException) {}
-        }
-        if (!registered) {
+        try {
+            manager.requestLocationUpdates(provider, 3000L, 5f, listener, Looper.getMainLooper())
+        } catch (_: Exception) {
             stopSelf()
             return START_NOT_STICKY
         }
