@@ -1255,8 +1255,11 @@ class MainActivity : AppCompatActivity() {
         if (navOn && compass.isOpen) { compass.close(); return }     // closing calls this function again
         val cmp = compass.isOpen
         backToStopNav.isEnabled = navOn || cmp
-        findViewById<View>(R.id.topColumn).visibility = if (navOn) View.GONE else View.VISIBLE
+        // Search and map-only actions must not sit underneath the compass / navigation panels.
+        findViewById<View>(R.id.topColumn).visibility = if (navOn || cmp) View.GONE else View.VISIBLE
         findViewById<View>(R.id.dock).visibility = if (navOn || cmp) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.btnFit).visibility = if (navOn) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.btnCompass).visibility = if (navOn) View.GONE else View.VISIBLE
         val rc = findViewById<View>(R.id.rightControls)
         rc.visibility = if (cmp) View.GONE else View.VISIBLE
         (rc.layoutParams as android.widget.FrameLayout.LayoutParams).bottomMargin = dp(if (navOn) 112 else 88)
