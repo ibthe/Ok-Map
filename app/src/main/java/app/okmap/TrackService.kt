@@ -79,10 +79,31 @@ class TrackService : Service() {
 
         val manager = getSystemService(LOCATION_SERVICE) as LocationManager
         lm = manager
-        try {
-            manager.removeUpdates(listener)
-            manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 3000L, 5f, listener, Looper.getMainLooper())
-        } catch (e: SecurityException) {
+        val fine = checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val coarse = checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val gps = fine && manager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+        val net = (fine || coarse) && manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        if (!gps && !net) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        try { manager.removeUpdates(listener) } catch (_: SecurityException) {}
+        running = false
+        var registered = false
+        if (gps) {
+            try {
+                manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 3000L, 5f, listener, Looper.getMainLooper())
+                registered = true
+            } catch (_: SecurityException) {}
+        }
+        if (net) {
+            try {
+                manager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 3000L, 5f, listener, Looper.getMainLooper())
+                registered = true
+            } catch (_: SecurityException) {}
+        }
+        if (!registered) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -91,7 +112,7 @@ class TrackService : Service() {
     }
 
     override fun onDestroy() {
-        lm?.removeUpdates(listener)
+        try { lm?.removeUpdates(listener) } catch (_: SecurityException) {}
         running = false
         super.onDestroy()
     }
