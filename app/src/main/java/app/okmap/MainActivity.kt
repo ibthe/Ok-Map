@@ -257,7 +257,16 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() { mapView.onPause(); ui.removeCallbacks(tick); super.onPause() }
     override fun onStop() { compass.pause(); if (!nav.navigating) stopLocationUpdates(); mapView.onStop(); super.onStop() }
     override fun onLowMemory() { super.onLowMemory(); mapView.onLowMemory() }
-    override fun onDestroy() { compass.close(); nav.shutdown(); mapView.onDestroy(); super.onDestroy() }
+    override fun onDestroy() {
+        ui.removeCallbacks(tick)
+        compass.close()
+        nav.shutdown()
+        try { placeDb?.close() } catch (_: Exception) {}
+        try { elevation?.close() } catch (_: Exception) {}
+        if (::userDb.isInitialized) userDb.close()
+        mapView.onDestroy()
+        super.onDestroy()
+    }
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         mapView.onSaveInstanceState(outState)
@@ -1413,6 +1422,26 @@ class MainActivity : AppCompatActivity() {
 
     private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
 
+    /** Parse GPX timestamps with an explicit UTC default; preserve offsets when the file provides one. */
+    private fun parseGpxTime(value: String): Long {
+        val patterns = listOf(
+            "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+            "yyyy-MM-dd'T'HH:mm:ssXXX",
+            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'"
+        )
+        for (pattern in patterns) {
+            try {
+                val fmt = SimpleDateFormat(pattern, Locale.US).apply {
+                    isLenient = false
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }
+                fmt.parse(value.trim())?.let { return it.time }
+            } catch (_: Exception) {}
+        }
+        return 0L
+    }
+
     private fun writeGpx(uri: Uri) {
         try {
             val iso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
@@ -1453,6 +1482,7 @@ class MainActivity : AppCompatActivity() {
                 var lat = 0.0
                 var lon = 0.0
                 var ele = Double.NaN
+                var ts = 0L
                 var name = ""
                 var trkName = "Импорт GPX"
                 val pts = ArrayList<UserDb.Pt>()
@@ -1462,14 +1492,15 @@ class MainActivity : AppCompatActivity() {
                         when (p.name) {
                             "wpt" -> { inWpt = true; name = ""; lat = p.getAttributeValue(null, "lat").toDouble(); lon = p.getAttributeValue(null, "lon").toDouble() }
                             "trk" -> { inTrk = true; trkName = "Импорт GPX"; pts.clear() }
-                            "trkpt" -> { inPt = true; ele = Double.NaN; lat = p.getAttributeValue(null, "lat").toDouble(); lon = p.getAttributeValue(null, "lon").toDouble() }
+                            "trkpt" -> { inPt = true; ele = Double.NaN; ts = 0L; lat = p.getAttributeValue(null, "lat").toDouble(); lon = p.getAttributeValue(null, "lon").toDouble() }
                             "name" -> { val t = p.nextText(); if (inWpt) name = t else if (inTrk && !inPt) trkName = t }
                             "ele" -> { val t = p.nextText(); if (inPt) ele = t.toDoubleOrNull() ?: Double.NaN }
+                            "time" -> { val t = p.nextText(); if (inPt) ts = parseGpxTime(t) }
                         }
                     } else if (ev == XmlPullParser.END_TAG) {
                         when (p.name) {
                             "wpt" -> { userDb.addWaypoint(name.ifBlank { "Точка" }, lat, lon); inWpt = false; wpts++ }
-                            "trkpt" -> { pts.add(UserDb.Pt(lat, lon, ele, 0L)); inPt = false }
+                            "trkpt" -> { pts.add(UserDb.Pt(lat, lon, ele, ts)); inPt = false }
                             "trk" -> {
                                 if (pts.isNotEmpty()) { val id = userDb.newTrack(trkName); userDb.addPoints(id, pts); trks++ }
                                 inTrk = false
