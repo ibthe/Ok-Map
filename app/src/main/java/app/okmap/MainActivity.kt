@@ -645,7 +645,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshMe() {
-        val l = myLoc
+        val l = myLoc?.takeIf { isFreshLocation(it) }
         src("ovl-me")?.setGeoJson(Geo.pointFc(if (l != null) listOf(LatLng(l.latitude, l.longitude)) else emptyList()))
     }
 
@@ -814,15 +814,15 @@ class MainActivity : AppCompatActivity() {
             val first = myLoc == null
             myLoc = l
             refreshMe()
-            compass.onLocation(l)
+            if (isFreshLocation(l)) compass.onLocation(l)
             if (isFreshLocation(l)) pendingRoute?.let { p ->
                 pendingRoute = null
                 pendingRouteTimeout?.let { ui.removeCallbacks(it) }
                 pendingRouteTimeout = null
                 nav.planTo(p.first.latitude, p.first.longitude, p.second, l.latitude, l.longitude)
             }
-            if (nav.navigating) { nav.onLocation(l); updateInfo(); return }
-            if ((first || following) && map != null) {
+            if (nav.navigating) { if (isFreshLocation(l)) nav.onLocation(l); updateInfo(); return }
+            if ((first || following) && isFreshLocation(l) && map != null) {
                 val z = maxOf(map!!.cameraPosition.zoom, 14.0)
                 map?.easeCamera(CameraUpdateFactory.newLatLngZoom(LatLng(l.latitude, l.longitude), z), 600)
                 following = true
