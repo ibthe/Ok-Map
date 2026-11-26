@@ -63,6 +63,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import kotlin.concurrent.thread
+import java.util.concurrent.Executors
 import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity() {
@@ -85,6 +86,10 @@ class MainActivity : AppCompatActivity() {
     private val ui = Handler(Looper.getMainLooper())
     private val errors = ArrayList<String>()
     private var searchResults: List<PlaceDb.Place> = emptyList()
+    private val searchWorker = Executors.newSingleThreadExecutor()
+    private var searchToken = 0
+    private var searchDebounce: Runnable? = null
+    private var searchIndexWarned = false
 
     private var rulerOn = false
     private val rulerPts = ArrayList<LatLng>()
@@ -259,6 +264,9 @@ class MainActivity : AppCompatActivity() {
     override fun onLowMemory() { super.onLowMemory(); mapView.onLowMemory() }
     override fun onDestroy() {
         ui.removeCallbacks(tick)
+        searchToken++
+        searchDebounce?.let { ui.removeCallbacks(it) }
+        searchWorker.shutdownNow()
         compass.close()
         nav.shutdown()
         try { placeDb?.close() } catch (_: Exception) {}
@@ -670,27 +678,62 @@ class MainActivity : AppCompatActivity() {
     // ============================================================ search
 
     private fun runSearch(q: String) {
-        if (q.trim().length < 2) {
+        val query = q.trim()
+        val token = ++searchToken
+        searchDebounce?.let { ui.removeCallbacks(it) }
+        searchDebounce = null
+        if (query.length < 2) {
+            searchResults = emptyList()
             lvResults.visibility = View.GONE
             return
         }
         val db = placeDb
         if (db == null) {
-            toast("Индекс поиска не найден в APK")
+            lvResults.visibility = View.GONE
+            if (!searchIndexWarned) {
+                toast("Индекс поиска не найден в APK")
+                searchIndexWarned = true
+            }
             return
         }
-        searchResults = db.search(q)
-        val items = searchResults.map { p ->
-            val names = listOf(p.ka, p.ru, p.en).filter { it.isNotEmpty() }.distinct().joinToString(" / ")
-            val extra = kindLabel(p.kind) + if (p.ele > 0) " · ${p.ele} м" else ""
-            names to extra
+
+        // LIKE substring search scans the offline index; keep that work off the UI thread.
+        lvResults.visibility = View.GONE
+        val task = Runnable {
+            searchDebounce = null
+            searchWorker.execute {
+                var found: List<PlaceDb.Place>? = null
+                var failure: String? = null
+                try { found = db.search(query) } catch (e: Exception) { failure = e.message ?: e.javaClass.simpleName }
+                runOnUiThread {
+                    if (token != searchToken || isFinishing || isDestroyed ||
+                        etSearch.text.toString().trim() != query) return@runOnUiThread
+                    if (failure != null) {
+                        errors.add("search: $failure")
+                        if (!searchIndexWarned) {
+                            toast("Ошибка поиска: $failure")
+                            searchIndexWarned = true
+                        }
+                        return@runOnUiThread
+                    }
+                    searchResults = found ?: emptyList()
+                    val items = searchResults.map { p ->
+                        val names = listOf(p.ka, p.ru, p.en).filter { it.isNotEmpty() }.distinct().joinToString(" / ")
+                        val extra = kindLabel(p.kind) + if (p.ele > 0) " · ${p.ele} м" else ""
+                        names to extra
+                    }
+                    lvResults.adapter = ResultsAdapter(items)
+                    val density = resources.displayMetrics.density
+                    val screenCap = (resources.displayMetrics.heightPixels - dp(240)).coerceAtLeast(dp(64))
+                    lvResults.layoutParams = lvResults.layoutParams.apply {
+                        height = minOf((items.size * 64 * density).roundToInt(), dp(320), screenCap)
+                    }
+                    lvResults.visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
+                }
+            }
         }
-        lvResults.adapter = ResultsAdapter(items)
-        val dp = resources.displayMetrics.density
-        lvResults.layoutParams = lvResults.layoutParams.apply {
-            height = minOf((items.size * 64 * dp).roundToInt(), (320 * dp).roundToInt())
-        }
-        lvResults.visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
+        searchDebounce = task
+        ui.postDelayed(task, 160)
     }
 
     private inner class ResultsAdapter(private val items: List<Pair<String, String>>) : BaseAdapter() {
