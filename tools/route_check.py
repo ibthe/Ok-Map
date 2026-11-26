@@ -88,7 +88,7 @@ class Graph:
                             if best is None or d < best[0]:
                                 best = (d, int(kseg), off + t * seg_len)
                             off += seg_len
-            if best is not None and best[0] < r * self.cell * 1e-6 * 111320 * 0.9:
+            if best is not None and best[0] <= r * self.cell * 1e-6 * 111320 * min(1.0, k):
                 break
         return best
 
