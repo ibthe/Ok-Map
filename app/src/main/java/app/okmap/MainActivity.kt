@@ -1737,6 +1737,12 @@ class MainActivity : AppCompatActivity() {
         } else sb.append("map.mbtiles: нет\n")
         sb.append("places.db: ").append(placeDb?.count()?.toString() ?: "нет").append(" мест\n")
         sb.append("relief: ").append(if (elevation != null) "есть" else "нет").append("\n")
+        val satFile = File(filesDir, "sat.mbtiles")
+        sb.append("спутниковые снимки: ").append(
+            if (satFile.exists()) "${satFile.length() shr 20} МБ, zoom от ${mbtilesMinZoom(satFile)}"
+            else "нет (показывается стилизованная подложка)"
+        ).append("\n")
+        sb.append("3D-здания: ").append(if (prefs.getBoolean("map_3d", false)) "включены" else "выключены").append("\n")
         try {
             val files = assets.list("glyphs/NotoSans")?.size ?: 0
             sb.append("шрифты (glyphs) в APK: $files файлов\n")
@@ -1757,7 +1763,7 @@ class MainActivity : AppCompatActivity() {
             sb.append("\nОтрисованные объекты на экране:\n")
             val rect = RectF(0f, 0f, v.width.toFloat(), v.height.toFloat())
             for (id in listOf("water", "landcover-wood", "landuse-residential", "road-primary", "road-minor",
-                "road-path", "building", "boundary-2", "boundary-4", "lbl-city", "lbl-town", "lbl-village", "lbl-peak", "lbl-road-major")) {
+                "road-path", "building", "building-3d", "boundary-2", "boundary-4", "lbl-city", "lbl-town", "lbl-village", "lbl-peak", "lbl-road-major")) {
                 val n = try { m.queryRenderedFeatures(rect, id).size } catch (e: Exception) { -1 }
                 sb.append("  $id: $n\n")
             }
