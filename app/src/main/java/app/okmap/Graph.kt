@@ -64,6 +64,7 @@ class Graph(file: File) {
     private val gw: Int
     private val gh: Int
     private val cellDataLen: Int
+    private val turnRestrictions = HashSet<Long>()
 
     private val oNLat: Int
     private val oNLon: Int
@@ -89,6 +90,8 @@ class Graph(file: File) {
         buf = raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length()).order(ByteOrder.LITTLE_ENDIAN)
         raf.close()
         require(buf.getInt(0) == 0x32474B4F) { "graph.bin: wrong format" }
+        val formatVersion = buf.getInt(4)
+        require(formatVersion == 1 || formatVersion == 2) { "graph.bin: unsupported version $formatVersion" }
         nodes = buf.getInt(8)
         segments = buf.getInt(12)
         shapePts = buf.getInt(16)
@@ -123,6 +126,19 @@ class Graph(file: File) {
         oNameBytes = p; p += pad4(nameBytes)
         oCellStart = p; p += 4 * (gw * gh + 1)
         oCellData = p
+        if (formatVersion >= 2) {
+            val turnOffset = oCellData + 4 * cellDataLen
+            require(turnOffset + 4 <= buf.limit()) { "graph.bin: missing turn section" }
+            val count = buf.getInt(turnOffset)
+            require(count >= 0 && turnOffset.toLong() + 4L + count.toLong() * 8L <= buf.limit().toLong()) { "graph.bin: invalid turn section" }
+            var q = turnOffset + 4
+            repeat(count) {
+                val incoming = buf.getInt(q); q += 4
+                val outgoing = buf.getInt(q); q += 4
+                require(incoming >= 0 && incoming < segments * 2 && outgoing >= 0 && outgoing < segments * 2) { "graph.bin: invalid directed arc" }
+                turnRestrictions.add((incoming.toLong() shl 32) or (outgoing.toLong() and 0xffffffffL))
+            }
+        }
     }
 
     // ---- raw accessors
