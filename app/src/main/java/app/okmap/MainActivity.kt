@@ -197,7 +197,7 @@ class MainActivity : AppCompatActivity() {
 
         nav = Navigator(this, { File(filesDir, "graph.bin").takeIf { it.exists() } }, { map }, { style }, prefs,
             { isNight() }, { onNavModeChanged() })
-        compass = Compass(this, { map }, { style }, prefs, { myLoc }, { withLocationPermission { startLocation(false) } },
+        compass = Compass(this, { map }, { style }, prefs, { myLoc?.takeIf { isFreshLocation(it) } }, { withLocationPermission { startLocation(false) } },
             { isNight() }, { onNavModeChanged() })
         findViewById<View>(R.id.btnCompass).setOnClickListener { if (compass.isOpen) compass.close() else compass.openLast() }
         onBackPressedDispatcher.addCallback(this, backToStopNav)
@@ -217,7 +217,7 @@ class MainActivity : AppCompatActivity() {
             if (c != null) addWaypointDialog(c)
         }
         findViewById<View>(R.id.btnLocation).setOnClickListener {
-            if (nav.navigating) nav.recenter(myLoc) else withLocationPermission { startLocation(true) }
+            if (nav.navigating) nav.recenter(myLoc?.takeIf { isFreshLocation(it) }) else withLocationPermission { startLocation(true) }
         }
         findViewById<View>(R.id.btnFit).setOnClickListener {
             map?.easeCamera(CameraUpdateFactory.newLatLngBounds(dataBounds(), 48), 700)
@@ -672,7 +672,11 @@ class MainActivity : AppCompatActivity() {
         elevation?.at(c.latitude, c.longitude)?.let { sb.append("  ·  ≈ $it м") }
         sb.append("  ·  z").append(String.format(Locale.US, "%.1f", m.cameraPosition.zoom))
         myLoc?.let {
-            val source = if (it.provider == LocationManager.GPS_PROVIDER) "GPS" else "Геолокация"
+            val source = when {
+                !isFreshLocation(it) -> "Последняя позиция"
+                it.provider == LocationManager.GPS_PROVIDER -> "GPS"
+                else -> "Геолокация"
+            }
             sb.append("\n").append(source).append(": ±").append(it.accuracy.roundToInt()).append(" м")
             if (it.hasAltitude()) sb.append(", высота ").append(it.altitude.roundToInt()).append(" м")
         } ?: run { if (locActive) sb.append("\nГеолокация: ожидание сигнала…") }
@@ -789,6 +793,9 @@ class MainActivity : AppCompatActivity() {
 
     // ============================================================ location
 
+    private fun isFreshLocation(location: Location?): Boolean =
+        location != null && System.currentTimeMillis() - location.time in 0..30_000L
+
     private fun hasLocationPermission() = ContextCompat.checkSelfPermission(
         this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
         ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -808,7 +815,7 @@ class MainActivity : AppCompatActivity() {
             myLoc = l
             refreshMe()
             compass.onLocation(l)
-            pendingRoute?.let { p ->
+            if (isFreshLocation(l)) pendingRoute?.let { p ->
                 pendingRoute = null
                 pendingRouteTimeout?.let { ui.removeCallbacks(it) }
                 pendingRouteTimeout = null
@@ -852,7 +859,7 @@ class MainActivity : AppCompatActivity() {
         }
         if (userRequested) {
             following = true
-            myLoc?.let {
+            myLoc?.takeIf { isFreshLocation(it) }?.let {
                 map?.easeCamera(CameraUpdateFactory.newLatLngZoom(LatLng(it.latitude, it.longitude), 15.0), 600)
             }
         }
@@ -1352,7 +1359,7 @@ class MainActivity : AppCompatActivity() {
         val me = myLoc
         pendingRouteTimeout?.let { ui.removeCallbacks(it) }
         pendingRouteTimeout = null
-        if (me != null && System.currentTimeMillis() - me.time < 30_000) {
+        if (isFreshLocation(me)) {
             pendingRoute = null
             nav.planTo(to.latitude, to.longitude, title, me.latitude, me.longitude)
             return
@@ -1365,8 +1372,8 @@ class MainActivity : AppCompatActivity() {
             val p = pendingRoute ?: return@Runnable
             pendingRoute = null
             val m = myLoc
-            if (m != null) nav.planTo(p.first.latitude, p.first.longitude, p.second, m.latitude, m.longitude)
-            else if (!isFinishing && !isDestroyed) Toast.makeText(this, "Местоположение не найдено. Включите GPS и выйдите на открытое место", Toast.LENGTH_LONG).show()
+            if (isFreshLocation(m)) nav.planTo(p.first.latitude, p.first.longitude, p.second, m!!.latitude, m.longitude)
+            else if (!isFinishing && !isDestroyed) Toast.makeText(this, "Свежая геопозиция не получена. Включите GPS и выйдите на открытое место", Toast.LENGTH_LONG).show()
         }
         pendingRouteTimeout = timeout
         ui.postDelayed(timeout, 20_000)
