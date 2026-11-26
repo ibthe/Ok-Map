@@ -2,6 +2,7 @@
 """Synthetic test of build_graph + route_check: a 12x12 street grid with a one-way street, a dead-end, a private
 road, a roundabout, an isolated island and a track. Run: python tools/test_graph.py"""
 import os
+import struct
 import sys
 import tempfile
 
@@ -111,3 +112,35 @@ uturn_target = uturn_graph.snap(41.72, 44.815)
 uturn_route = uturn_graph.route(uturn_start, uturn_target)
 assert uturn_route is not None and len(uturn_route[1]) == 2, ("no_u_turn blocked straight travel", uturn_route)
 print("same-way no_u_turn test passed")
+
+
+# OSM relation applicability: car-specific values override generic values, while
+# explicit car exemptions must not become restrictions in the car graph.
+assert bg.car_restriction_kind({"type": "restriction", "restriction": "no_left_turn"}) == "no_left_turn"
+assert bg.car_restriction_kind({"type": "restriction", "restriction": "no_left_turn",
+                                "restriction:motorcar": "no_right_turn"}) == "no_right_turn"
+assert bg.car_restriction_kind({"type": "restriction", "restriction": "no_left_turn",
+                                "except": "psv; motorcar"}) is None
+assert bg.car_restriction_kind({"type": "restriction", "restriction": "only_straight_on",
+                                "except": "vehicle"}) is None
+assert bg.car_restriction_kind({"type": "restriction", "restriction": "no_entry"}) is None
+
+# The Python reader accepts legacy v1 graphs, but rejects truncated / malformed v2 tails.
+legacy_raw = bytearray(open(p, "rb").read())
+assert struct.unpack_from("<i", legacy_raw, 4)[0] == 2
+struct.pack_into("<i", legacy_raw, 4, 1)
+legacy_path = os.path.join(tempfile.mkdtemp(), "legacy-v1.bin")
+open(legacy_path, "wb").write(legacy_raw[:-4])  # v2's zero-count restriction tail
+legacy_graph = rc.Graph(legacy_path)
+assert legacy_graph.version == 1 and not legacy_graph.turns
+
+bad_raw = bytearray(open(p, "rb").read())
+struct.pack_into("<i", bad_raw, len(bad_raw) - 4, -1)
+bad_path = os.path.join(tempfile.mkdtemp(), "bad-v2.bin")
+open(bad_path, "wb").write(bad_raw)
+try:
+    rc.Graph(bad_path)
+    raise AssertionError("malformed v2 restriction section was accepted")
+except ValueError:
+    pass
+print("OSM car-exception and graph-format validation tests passed")
