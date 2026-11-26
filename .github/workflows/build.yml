@@ -216,6 +216,18 @@ jobs:
           curl -L --fail -o app/src/main/assets/sat.mbtiles "${{ inputs.sat_url }}"
           ls -lh app/src/main/assets/sat.mbtiles
 
+      - name: Fingerprint offline map data
+        run: |
+          : > app/src/main/assets/data.version
+          for name in map.mbtiles places.db relief.mbtiles graph.bin sat.mbtiles contours.mbtiles; do
+            file="app/src/main/assets/$name"
+            if [ -s "$file" ]; then
+              hash="$(sha256sum "$file" | cut -d' ' -f1)"
+              printf '%s=%s\\n' "$name" "$hash" >> app/src/main/assets/data.version
+            fi
+          done
+          cat app/src/main/assets/data.version
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.10.2"
