@@ -494,5 +494,7 @@ def read_pbf(path):
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         sys.exit(__doc__)
-    ways, restrictions = read_pbf(sys.argv[1])
-    write(build(ways, restrictions=restrictions), sys.argv[2])
+    ways, restrictions, via_way_restrictions = read_pbf(sys.argv[1])
+    graph = build(ways, restrictions=restrictions, via_way_restrictions=via_way_restrictions)
+    print("via-way sequence restriction records:", len(graph["sequence_restrictions"]))
+    write(graph, sys.argv[2])
