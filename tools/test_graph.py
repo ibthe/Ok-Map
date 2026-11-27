@@ -237,8 +237,13 @@ conditional_data = bg.build(
     multi_ways, min_component=1,
     conditional_restrictions=[(10, 502, 20, "no_left_turn", 0b0011111, 420, 540)]
 )
-assert conditional_data["conditional_turn_restrictions"].shape == (2, 5), conditional_data["conditional_turn_restrictions"]
+assert conditional_data["conditional_turn_restrictions"].shape == (1, 5), conditional_data["conditional_turn_restrictions"]
 assert set(conditional_data["conditional_turn_restrictions"][:, 2]) == {0b0011111}
+conditional_only_data = bg.build(
+    multi_ways, min_component=1,
+    conditional_restrictions=[(10, 502, 20, "only_straight_on", 0b0011111, 420, 540)]
+)
+assert conditional_only_data["conditional_turn_restrictions"].shape == (2, 5), conditional_only_data["conditional_turn_restrictions"]
 conditional_path = os.path.join(tempfile.mkdtemp(), "conditional-v4.bin")
 bg.write(conditional_data, conditional_path)
 conditional_reference = rc.Graph(conditional_path)
