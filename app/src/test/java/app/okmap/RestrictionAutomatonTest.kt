@@ -14,7 +14,7 @@ class RestrictionAutomatonTest {
     @Test
     fun noViaWayRestrictionBlocksOnlyTheForbiddenContinuation() {
         val automaton = RestrictionAutomaton(
-            listOf(SequenceRestriction(type = 1, prefix = intArrayOf(10, 20), allowed = intArrayOf()))
+            listOf(SequenceRestriction(type = 1, prefix = intArrayOf(10, 20, 30), allowed = intArrayOf()))
         )
         val state = stateAfter(automaton, 10, 20)
 
@@ -37,8 +37,8 @@ class RestrictionAutomatonTest {
     fun overlappingViaWaySuffixRemainsActiveAfterAhoCorasickFallback() {
         val automaton = RestrictionAutomaton(
             listOf(
-                SequenceRestriction(type = 1, prefix = intArrayOf(10, 20), allowed = intArrayOf()),
-                SequenceRestriction(type = 1, prefix = intArrayOf(20, 30), allowed = intArrayOf())
+                SequenceRestriction(type = 1, prefix = intArrayOf(10, 20, 30), allowed = intArrayOf()),
+                SequenceRestriction(type = 1, prefix = intArrayOf(20, 30, 40), allowed = intArrayOf())
             )
         )
         val state = stateAfter(automaton, 10, 20, 30)
