@@ -380,11 +380,15 @@ def build(ways, min_component=40, cell=5000, restrictions=(), via_way_restrictio
 
     # grid index over segment shapes (for snapping the user's point to the road)
     nlat_a, nlon_a = np.array(nlat, dtype="<i4"), np.array(nlon, dtype="<i4")
-    lat0, lon0 = int(nlat_a.min()) - cell, int(nlon_a.min()) - cell
-    W = (int(nlon_a.max()) - lon0) // cell + 2
-    H = (int(nlat_a.max()) - lat0) // cell + 2
-    cells = {}
     shp_lat_a, shp_lon_a = np.array(shp_lat, dtype="<i4"), np.array(shp_lon, dtype="<i4")
+    # Intermediate geometry points can extend beyond the endpoint/junction bounds
+    # (for example, a curved road between two junctions). Include them in the grid extent.
+    all_lat = np.concatenate((nlat_a, shp_lat_a))
+    all_lon = np.concatenate((nlon_a, shp_lon_a))
+    lat0, lon0 = int(all_lat.min()) - cell, int(all_lon.min()) - cell
+    W = (int(all_lon.max()) - lon0) // cell + 2
+    H = (int(all_lat.max()) - lat0) // cell + 2
+    cells = {}
     for k in range(S):
         la = [int(nlat_a[A[k]])] + [int(v) for v in shp_lat_a[SST[k]:SST[k] + SCNT[k]]] + [int(nlat_a[B[k]])]
         lo = [int(nlon_a[A[k]])] + [int(v) for v in shp_lon_a[SST[k]:SST[k] + SCNT[k]]] + [int(nlon_a[B[k]])]
