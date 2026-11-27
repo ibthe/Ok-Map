@@ -164,6 +164,18 @@ assert bg.parse_via_way_members([
 assert bg.parse_via_way_members([
     ("from", "w", 100), ("to", "w", 400)
 ]) is None
+assert bg.parse_via_way_members([
+    ("from", "n", 99), ("from", "w", 100), ("via", "w", 200), ("to", "w", 400)
+]) is None
+assert bg.parse_via_way_members([
+    ("from", "w", 100), ("via", "w", 200), ("to", "w", 400), ("to", "n", 401)
+]) is None
+assert bg.parse_via_node_members([
+    ("from", "w", 100), ("via", "n", 250), ("to", "w", 400)
+]) == (100, 250, 400)
+assert bg.parse_via_node_members([
+    ("from", "w", 100), ("via", "n", 250), ("via", "r", 251), ("to", "w", 400)
+]) is None
 print("ordered via-way relation parsing tests passed")
 
 
