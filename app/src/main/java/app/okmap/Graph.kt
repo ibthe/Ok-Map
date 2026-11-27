@@ -705,11 +705,9 @@ class Graph(file: File) {
         val la = DList()
         val lo = DList()
         val boundary = IntArray(legs.size)         // index of the last point of each leg in the polyline
-        var seconds = 0.0
         for ((i, l) in legs.withIndex()) {
             appendSlice(l.seg, l.from, l.to, la, lo)
             boundary[i] = la.n - 1
-            seconds += cost(l.seg, abs(l.to - l.from), avoidUnpaved)
         }
         val n = la.n
         val cum = DoubleArray(n)
