@@ -49,6 +49,81 @@ class Route(
  * The file is memory-mapped, so the whole country costs almost no Java heap.
  * Algorithm and file layout are mirrored by tools/route_check.py, which is tested in CI.
  */
+private data class SequenceRestriction(val type: Int, val prefix: IntArray, val allowed: IntArray)
+
+/** Aho-Corasick automaton over directed road arcs; supports overlapping via-way restrictions. */
+private class RestrictionAutomaton(restrictions: List<SequenceRestriction>) {
+    private val edges = ArrayList<HashMap<Int, Int>>()
+    private val fail = ArrayList<Int>()
+    private val forbidden = ArrayList<Boolean>()
+    private val localOnly = ArrayList<MutableList<Set<Int>>>()
+    private val onlyAllowed = ArrayList<Set<Int>?>()
+
+    init {
+        addState()
+        for (r in restrictions) {
+            var state = 0
+            for (arc in r.prefix) {
+                var next = edges[state][arc]
+                if (next == null) {
+                    next = addState()
+                    edges[state][arc] = next
+                }
+                state = next
+            }
+            if (r.type == 1) forbidden[state] = true
+            else localOnly[state].add(r.allowed.toSet())
+        }
+        val queue = java.util.ArrayDeque<Int>()
+        for (child in edges[0].values) queue.add(child)
+        while (queue.isNotEmpty()) {
+            val state = queue.removeFirst()
+            val f = fail[state]
+            forbidden[state] = forbidden[state] || forbidden[f]
+            val inherited = onlyAllowed[f]
+            val local = localOnly[state]
+            if (inherited != null || local.isNotEmpty()) {
+                var allowed: MutableSet<Int>? = inherited?.toMutableSet()
+                for (set in local) {
+                    if (allowed == null) allowed = set.toMutableSet()
+                    else allowed!!.retainAll(set)
+                }
+                onlyAllowed[state] = allowed ?: emptySet()
+            }
+            for ((arc, child) in edges[state]) {
+                queue.add(child)
+                var fallback = fail[state]
+                while (fallback != 0 && !edges[fallback].containsKey(arc)) fallback = fail[fallback]
+                fail[child] = edges[fallback][arc] ?: 0
+            }
+        }
+    }
+
+    private fun addState(): Int {
+        val id = edges.size
+        edges.add(HashMap())
+        fail.add(0)
+        forbidden.add(false)
+        localOnly.add(ArrayList())
+        onlyAllowed.add(null)
+        return id
+    }
+
+    fun next(state0: Int, arc: Int): Int {
+        var state = state0
+        while (state != 0 && !edges[state].containsKey(arc)) state = fail[state]
+        return edges[state][arc] ?: 0
+    }
+
+    fun isForbidden(state: Int) = forbidden[state]
+
+    fun blocks(state: Int, arc: Int): Boolean {
+        val allowed = onlyAllowed[state]
+        if (allowed != null && arc !in allowed) return true
+        return forbidden(next(state, arc))
+    }
+}
+
 class Graph(file: File) {
     private val buf: ByteBuffer
     val nodes: Int
@@ -65,6 +140,7 @@ class Graph(file: File) {
     private val gh: Int
     private val cellDataLen: Int
     private val turnRestrictions = HashSet<Long>()
+    private lateinit var restrictionAutomaton: RestrictionAutomaton
 
     private val oNLat: Int
     private val oNLon: Int
@@ -91,7 +167,7 @@ class Graph(file: File) {
         raf.close()
         require(buf.getInt(0) == 0x32474B4F) { "graph.bin: wrong format" }
         val formatVersion = buf.getInt(4)
-        require(formatVersion == 1 || formatVersion == 2) { "graph.bin: unsupported version $formatVersion" }
+        require(formatVersion == 1 || formatVersion == 2 || formatVersion == 3) { "graph.bin: unsupported version $formatVersion" }
         nodes = buf.getInt(8)
         segments = buf.getInt(12)
         shapePts = buf.getInt(16)
@@ -134,24 +210,57 @@ class Graph(file: File) {
         require(baseEndLong >= oCellData.toLong() && baseEndLong <= buf.limit().toLong()) {
             "graph.bin: truncated cell index"
         }
+        val sequenceRestrictions = ArrayList<SequenceRestriction>()
         if (formatVersion == 1) {
             require(baseEndLong == buf.limit().toLong()) { "graph.bin: unexpected trailing data in v1" }
         } else {
             require(baseEndLong + 4L <= buf.limit().toLong()) { "graph.bin: missing turn section" }
             val turnOffset = baseEndLong.toInt()
             val count = buf.getInt(turnOffset)
-            val endLong = turnOffset.toLong() + 4L + count.toLong() * 8L
-            require(count >= 0 && endLong == buf.limit().toLong()) { "graph.bin: invalid turn section size" }
+            val turnEndLong = turnOffset.toLong() + 4L + count.toLong() * 8L
+            require(count >= 0 && turnEndLong <= buf.limit().toLong()) { "graph.bin: invalid turn section size" }
             var q = turnOffset + 4
             repeat(count) {
                 val incoming = buf.getInt(q); q += 4
                 val outgoing = buf.getInt(q); q += 4
                 require(incoming >= 0 && incoming < segments * 2 && outgoing >= 0 && outgoing < segments * 2) {
-                    "graph.bin: invalid directed arc"
+                    "graph.bin: invalid turn arc"
                 }
                 turnRestrictions.add((incoming.toLong() shl 32) or (outgoing.toLong() and 0xffffffffL))
             }
+            if (formatVersion == 2) {
+                require(turnEndLong == buf.limit().toLong()) { "graph.bin: unexpected trailing data in v2" }
+            } else {
+                require(turnEndLong + 4L <= buf.limit().toLong()) { "graph.bin: missing sequence section" }
+                q = turnEndLong.toInt()
+                val sequenceCount = buf.getInt(q); q += 4
+                require(sequenceCount >= 0) { "graph.bin: invalid sequence count" }
+                repeat(sequenceCount) {
+                    require(q.toLong() + 12L <= buf.limit().toLong()) { "graph.bin: truncated sequence header" }
+                    val type = buf.getInt(q); q += 4
+                    val prefixCount = buf.getInt(q); q += 4
+                    val allowedCount = buf.getInt(q); q += 4
+                    require((type == 1 || type == 2) && prefixCount > 0 && allowedCount >= 0 &&
+                        (type != 1 || allowedCount == 0) && (type != 2 || allowedCount > 0)) {
+                        "graph.bin: invalid sequence header"
+                    }
+                    val total = prefixCount.toLong() + allowedCount.toLong()
+                    require(total <= Int.MAX_VALUE / 4 && q.toLong() + total * 4L <= buf.limit().toLong()) {
+                        "graph.bin: truncated sequence arcs"
+                    }
+                    val prefix = IntArray(prefixCount) { buf.getInt(q + it * 4) }
+                    q += prefixCount * 4
+                    val allowed = IntArray(allowedCount) { buf.getInt(q + it * 4) }
+                    q += allowedCount * 4
+                    require((prefix.asSequence() + allowed.asSequence()).all { it >= 0 && it < segments * 2 }) {
+                        "graph.bin: sequence arc out of range"
+                    }
+                    sequenceRestrictions.add(SequenceRestriction(type, prefix, allowed))
+                }
+                require(q == buf.limit()) { "graph.bin: unexpected trailing sequence data" }
+            }
         }
+        restrictionAutomaton = RestrictionAutomaton(sequenceRestrictions)
     }
 
     // ---- raw accessors
