@@ -69,8 +69,12 @@ jobs:
           OSM_URL: ${{ inputs.osm_url || '' }}
           MAP_DATA_REVISION: ${{ inputs.map_data_revision || 'default' }}
         run: |
+          # Every cached dataset builder must participate in the cache key.
+          # Otherwise a stamp mismatch rebuilds the asset on every run, but an exact
+          # cache hit prevents the corrected asset from ever being saved.
           HASH=$(
-            cat tools/fetch_osm.py tools/finalize_tiles.py tools/check_tiles.py tools/mvt.py tools/build_relief.py |
+            cat tools/fetch_osm.py tools/finalize_tiles.py tools/check_tiles.py tools/mvt.py \
+              tools/build_relief.py tools/build_places.py tools/build_contours.py |
               sha256sum | cut -d' ' -f1
           )
           FETCH_HASH=$(sha256sum tools/fetch_osm.py | cut -d' ' -f1)
