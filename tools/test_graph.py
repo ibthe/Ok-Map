@@ -278,3 +278,39 @@ snap_graph = rc.Graph(snap_path)
 latitude_snap = snap_graph.snap(41.7325, 44.8049)
 assert latitude_snap[1] == 1, ("latitude-aware grid search missed the closer road", latitude_snap)
 print("latitude-aware road snapping test passed")
+
+
+# Starting exactly at a junction must not invent an incoming from-way arc.
+junction_pts = {
+    "a": (6001, 41.8000, 44.8000),
+    "b": (6002, 41.8000, 44.8100),
+    "c": (6003, 41.8100, 44.8100),
+    "d": (6004, 41.8000, 44.8200),
+    "f": (6005, 41.8000, 44.8300),
+    "e": (6006, 41.8005, 44.8150),
+}
+junction_ways = [
+    ({"highway": "residential"}, [junction_pts["a"], junction_pts["b"]], 610),
+    ({"highway": "residential", "oneway": "yes"}, [junction_pts["b"], junction_pts["c"]], 620),
+    ({"highway": "residential"}, [junction_pts["c"], junction_pts["d"]], 630),
+    ({"highway": "residential"}, [junction_pts["d"], junction_pts["f"]], 660),
+    ({"highway": "residential"}, [junction_pts["b"], junction_pts["e"]], 640),
+    ({"highway": "residential"}, [junction_pts["e"], junction_pts["d"]], 650),
+]
+junction_data = bg.build(junction_ways, min_component=1,
+                         via_way_restrictions=[(610, (620,), 630, "only_straight_on")])
+junction_path = os.path.join(tempfile.mkdtemp(), "junction-start.bin")
+bg.write(junction_data, junction_path)
+junction_graph = rc.Graph(junction_path)
+junction_target = junction_graph.snap(41.8000, 44.8250)
+assert junction_target[1] == 3, junction_target
+start_at_b = (0.0, 0, float(junction_graph.LEN[0]) / 10.0)
+from_junction = junction_graph.route(start_at_b, junction_target)
+assert from_junction is not None and {3, 4, 5}.issubset({k for k, _ in from_junction[1]}) and 1 not in {
+    k for k, _ in from_junction[1]}, ("junction start was incorrectly treated as incoming from-way", from_junction)
+
+start_at_a = (0.0, 0, 0.0)
+from_upstream = junction_graph.route(start_at_a, junction_target)
+assert from_upstream is not None and 1 in {k for k, _ in from_upstream[1]}, (
+    "via-way only restriction stopped applying after actually traversing the from-way", from_upstream)
+print("junction-start routing and via-way context tests passed")
