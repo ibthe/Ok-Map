@@ -74,6 +74,7 @@ jobs:
               sha256sum | cut -d' ' -f1
           )
           REV=$(printf '%s|%s' "$OSM_URL" "$MAP_DATA_REVISION" | sha256sum | cut -d' ' -f1)
+          echo "source_revision=$REV" >> "$GITHUB_OUTPUT"
           echo "key=mapdata-v4-${HASH}-${REV}" >> "$GITHUB_OUTPUT"
 
       # Map data (tiles, search index, relief) is rebuilt only when the tile tools change.
@@ -135,7 +136,7 @@ jobs:
           path: |
             app/src/main/assets/graph.bin
             app/src/main/assets/graph.stamp
-          key: roadgraph-v3-${{ hashFiles('tools/build_graph.py') }}
+          key: roadgraph-v3-${{ hashFiles('tools/build_graph.py') }}-${{ steps.mapcache.outputs.source_revision }}
 
       # decided once, before anything is built (a file check per step would change mid-run)
       - name: Decide what has to be rebuilt
@@ -158,7 +159,7 @@ jobs:
           echo "$PH" > /tmp/places.stamp
           [ "$(cat app/src/main/assets/places.stamp 2>/dev/null)" = "$PH" ] || echo "places=true" >> "$GITHUB_OUTPUT"
           [ -s app/src/main/assets/graph.bin ] || echo "graph=true" >> "$GITHUB_OUTPUT"
-          GH=$(cat tools/build_graph.py | sha1sum | cut -d' ' -f1)
+          GH=$(printf '%s|%s|%s' "$(cat tools/build_graph.py | sha1sum | cut -d' ' -f1)" "$OSM_URL" "$MAP_DATA_REVISION" | sha1sum | cut -d' ' -f1)
           echo "$GH" > /tmp/graph.stamp
           [ "$(cat app/src/main/assets/graph.stamp 2>/dev/null)" = "$GH" ] || echo "graph=true" >> "$GITHUB_OUTPUT"
           [ -s app/src/main/assets/contours.mbtiles ] || echo "contours=true" >> "$GITHUB_OUTPUT"
@@ -250,7 +251,7 @@ jobs:
           path: |
             app/src/main/assets/graph.bin
             app/src/main/assets/graph.stamp
-          key: roadgraph-v3-${{ hashFiles('tools/build_graph.py') }}
+          key: roadgraph-v3-${{ hashFiles('tools/build_graph.py') }}-${{ steps.mapcache.outputs.source_revision }}
 
       - name: Build relief tiles (hillshade + elevation readout)
         if: steps.need.outputs.relief == 'true'
