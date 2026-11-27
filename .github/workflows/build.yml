@@ -362,12 +362,22 @@ jobs:
 
       # Exercise SQLite migrations, atomic user-data writes, offline manifest permissions,
       # and first-launch map-data extraction on a real Android runtime.
+      - name: Enable KVM group permissions
+        run: |
+          if [ -e /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+            ls -l /dev/kvm
+          else
+            echo "KVM device is unavailable; the emulator will use the TCG fallback."
+          fi
+
       - name: Run Android emulator smoke tests
         uses: reactivecircus/android-emulator-runner@v2
         timeout-minutes: 30
         env:
-          # Standard GitHub-hosted Linux runners do not expose /dev/kvm.
-          # Emulator 37.3+ requires this opt-in to allow slow TCG fallback.
+          # Emulator 37.3+ requires this opt-in only when hardware acceleration is unavailable.
           ANDROID_I_WANT_MY_TCG: yes
         with:
           api-level: 34
@@ -375,7 +385,7 @@ jobs:
           arch: x86_64
           profile: pixel_2
           disable-animations: true
-          disable-linux-hw-accel: true
+          # Auto-detect KVM after the permissions step; fall back to TCG only if absent.
           emulator-boot-timeout: 600
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: gradle --no-daemon :app:connectedDebugAndroidTest
