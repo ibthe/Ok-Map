@@ -73,7 +73,8 @@ jobs:
             cat tools/fetch_osm.py tools/finalize_tiles.py tools/check_tiles.py tools/mvt.py tools/build_relief.py |
               sha256sum | cut -d' ' -f1
           )
-          REV=$(printf '%s|%s' "$OSM_URL" "$MAP_DATA_REVISION" | sha256sum | cut -d' ' -f1)
+          FETCH_HASH=$(sha256sum tools/fetch_osm.py | cut -d' ' -f1)
+          REV=$(printf '%s|%s|%s' "$OSM_URL" "$MAP_DATA_REVISION" "$FETCH_HASH" | sha256sum | cut -d' ' -f1)
           echo "source_revision=$REV" >> "$GITHUB_OUTPUT"
           echo "key=mapdata-v4-${HASH}-${REV}" >> "$GITHUB_OUTPUT"
 
