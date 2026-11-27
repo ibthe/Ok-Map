@@ -209,6 +209,13 @@ class Graph:
                 heapq.heappush(heap, (cost + heuristic(arc_end(arc)), state))
 
         best, best_state, best_end_arc = INF, None, None
+        direct_start_leg = None
+        if start_at_node and int(self.A[ke]) == start_node and self.FLG[ke] & 1:
+            best, direct_start_leg = self.cost(ke, oe), (ke, True)
+        if start_at_node and int(self.B[ke]) == start_node and self.FLG[ke] & 2:
+            direct = self.cost(ke, Le - oe)
+            if direct < best:
+                best, direct_start_leg = direct, (ke, False)
         done = set()
         while heap:
             estimate, state = heapq.heappop(heap)
@@ -250,7 +257,7 @@ class Graph:
                     heapq.heappush(heap, (candidate + heuristic(nxt), next_state))
 
         if best_state is None:
-            return None
+            return (best, [direct_start_leg]) if direct_start_leg is not None else None
         arcs, state = [], best_state
         while state is not None:
             arcs.append(state[0])
