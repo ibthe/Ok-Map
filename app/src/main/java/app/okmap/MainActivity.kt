@@ -2213,6 +2213,10 @@ class MainActivity : AppCompatActivity() {
             var error: String? = null
             try {
                 val p = Xml.newPullParser()
+                // GPX is user-supplied XML. Do not process document type declarations or
+                // external entities; only the GPX data itself is needed.
+                p.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
+                p.setFeature("http://xmlpull.org/v1/doc/features.html#process-docdecl", false)
                 contentResolver.openInputStream(uri)?.use { stream ->
                     p.setInput(stream, null)
                     var inWpt = false
@@ -2225,35 +2229,93 @@ class MainActivity : AppCompatActivity() {
                     var name = ""
                     var wptFolder = UserDb.DEFAULT_FOLDER
                     var trkName = "Импорт GPX"
-                    val pts = ArrayList<UserDb.Pt>()
-                    val segments = ArrayList<List<UserDb.Pt>>()
+                    var currentTrackId = 0L
+                    val batch = ArrayList<UserDb.Pt>(1000)
+
+                    fun coordinate(attribute: String, min: Double, max: Double): Double {
+                        val value = p.getAttributeValue(null, attribute)?.toDoubleOrNull()
+                            ?: throw IllegalArgumentException("Некорректная координата $attribute")
+                        if (!value.isFinite() || value < min || value > max) {
+                            throw IllegalArgumentException("Координата $attribute вне диапазона")
+                        }
+                        return value
+                    }
+
+                    fun flushTrackPoints() {
+                        if (batch.isEmpty()) return
+                        if (currentTrackId == 0L) {
+                            currentTrackId = importDb.newTrack(trkName)
+                            trks++
+                        }
+                        importDb.addPoints(currentTrackId, batch)
+                        batch.clear()
+                    }
+
                     var ev = p.eventType
                     while (ev != XmlPullParser.END_DOCUMENT) {
                         if (ev == XmlPullParser.START_TAG) {
                             when (p.name) {
-                                "wpt" -> { inWpt = true; name = ""; wptFolder = UserDb.DEFAULT_FOLDER; lat = p.getAttributeValue(null, "lat").toDouble(); lon = p.getAttributeValue(null, "lon").toDouble() }
-                                "trk" -> { inTrk = true; trkName = "Импорт GPX"; pts.clear(); segments.clear() }
-                                "trkseg" -> pts.clear()
-                                "trkpt" -> { inPt = true; ele = Double.NaN; ts = 0L; lat = p.getAttributeValue(null, "lat").toDouble(); lon = p.getAttributeValue(null, "lon").toDouble() }
-                                "name" -> { val t = p.nextText(); if (inWpt) name = t else if (inTrk && !inPt) trkName = t }
-                                "type" -> { val t = p.nextText(); if (inWpt) wptFolder = t.ifBlank { UserDb.DEFAULT_FOLDER } }
-                                "ele" -> { val t = p.nextText(); if (inPt) ele = t.toDoubleOrNull() ?: Double.NaN }
-                                "time" -> { val t = p.nextText(); if (inPt) ts = parseGpxTime(t) }
+                                "wpt" -> {
+                                    inWpt = true
+                                    name = ""
+                                    wptFolder = UserDb.DEFAULT_FOLDER
+                                    lat = coordinate("lat", -90.0, 90.0)
+                                    lon = coordinate("lon", -180.0, 180.0)
+                                }
+                                "trk" -> {
+                                    inTrk = true
+                                    trkName = "Импорт GPX"
+                                    currentTrackId = 0L
+                                    batch.clear()
+                                }
+                                "trkseg" -> {
+                                    flushTrackPoints()
+                                    currentTrackId = 0L
+                                }
+                                "trkpt" -> {
+                                    inPt = true
+                                    ele = Double.NaN
+                                    ts = 0L
+                                    lat = coordinate("lat", -90.0, 90.0)
+                                    lon = coordinate("lon", -180.0, 180.0)
+                                }
+                                "name" -> {
+                                    val t = p.nextText()
+                                    if (inWpt) name = t else if (inTrk && !inPt) trkName = t
+                                }
+                                "type" -> {
+                                    val t = p.nextText()
+                                    if (inWpt) wptFolder = t.ifBlank { UserDb.DEFAULT_FOLDER }
+                                }
+                                "ele" -> {
+                                    val t = p.nextText()
+                                    if (inPt) ele = t.toDoubleOrNull()?.takeIf { it.isFinite() } ?: Double.NaN
+                                }
+                                "time" -> {
+                                    val t = p.nextText()
+                                    if (inPt) ts = parseGpxTime(t)
+                                }
                             }
                         } else if (ev == XmlPullParser.END_TAG) {
                             when (p.name) {
-                                "wpt" -> { importDb.addWaypoint(name.ifBlank { "Точка" }, lat, lon, wptFolder); inWpt = false; wpts++ }
-                                "trkpt" -> { pts.add(UserDb.Pt(lat, lon, ele, ts)); inPt = false }
-                                "trkseg" -> { if (pts.isNotEmpty()) segments.add(pts.toList()); pts.clear() }
+                                "wpt" -> {
+                                    importDb.addWaypoint(name.ifBlank { "Точка" }, lat, lon, wptFolder)
+                                    inWpt = false
+                                    wpts++
+                                }
+                                "trkpt" -> {
+                                    batch.add(UserDb.Pt(lat, lon, ele, ts))
+                                    inPt = false
+                                    if (batch.size >= 1000) flushTrackPoints()
+                                }
+                                "trkseg" -> {
+                                    flushTrackPoints()
+                                    currentTrackId = 0L
+                                }
                                 "trk" -> {
-                                    if (pts.isNotEmpty()) segments.add(pts.toList()) // GPX files may omit trkseg
-                                    segments.forEachIndexed { i, segment ->
-                                        val suffix = if (segments.size > 1) " · часть ${i + 1}" else ""
-                                        val id = importDb.newTrack(trkName + suffix)
-                                        importDb.addPoints(id, segment)
-                                        trks++
-                                    }
-                                    pts.clear(); segments.clear(); inTrk = false
+                                    flushTrackPoints()
+                                    currentTrackId = 0L
+                                    inTrk = false
                                 }
                             }
                         }
