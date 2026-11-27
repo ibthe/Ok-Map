@@ -145,6 +145,7 @@ jobs:
         env:
           OSM_URL: ${{ inputs.osm_url || '' }}
           MAP_DATA_REVISION: ${{ inputs.map_data_revision || 'default' }}
+          SOURCE_REVISION: ${{ steps.mapcache.outputs.source_revision }}
         run: |
           mkdir -p app/src/main/assets
           # Cache restore-keys can restore an older map after a builder/source cache miss.
@@ -160,7 +161,7 @@ jobs:
           echo "$PH" > /tmp/places.stamp
           [ "$(cat app/src/main/assets/places.stamp 2>/dev/null)" = "$PH" ] || echo "places=true" >> "$GITHUB_OUTPUT"
           [ -s app/src/main/assets/graph.bin ] || echo "graph=true" >> "$GITHUB_OUTPUT"
-          GH=$(printf '%s|%s|%s' "$(cat tools/build_graph.py | sha1sum | cut -d' ' -f1)" "$OSM_URL" "$MAP_DATA_REVISION" | sha1sum | cut -d' ' -f1)
+          GH=$(printf '%s|%s' "$(cat tools/build_graph.py | sha1sum | cut -d' ' -f1)" "$SOURCE_REVISION" | sha256sum | cut -d' ' -f1)
           echo "$GH" > /tmp/graph.stamp
           [ "$(cat app/src/main/assets/graph.stamp 2>/dev/null)" = "$GH" ] || echo "graph=true" >> "$GITHUB_OUTPUT"
           [ -s app/src/main/assets/contours.mbtiles ] || echo "contours=true" >> "$GITHUB_OUTPUT"
