@@ -8,6 +8,7 @@ import android.view.LayoutInflater
 import android.view.View
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import org.maplibre.android.MapLibre
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -103,6 +104,8 @@ class OfflineAppSmokeTest {
         assertTrue("Offline road graph is missing", assets.contains("graph.bin"))
         assertTrue("Offline places index is missing", assets.contains("places.db"))
 
+        // MapLibre must be initialized before XML inflation constructs its MapView.
+        MapLibre.getInstance(context)
         val root = LayoutInflater.from(context).inflate(R.layout.activity_main, null, false)
         val ids = listOf(
             R.id.mapView, R.id.etSearch, R.id.btnMenu, R.id.btnPoint,
