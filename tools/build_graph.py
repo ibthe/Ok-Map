@@ -342,8 +342,8 @@ def build(ways, min_component=40, cell=5000, restrictions=(), via_way_restrictio
             prefix = [from_arc] + list(via_prefix)
             if kind.startswith("only_"):
                 full_path = prefix
-                for i, arc in enumerate(full_path):
-                    sequence_restrictions.append((2, full_path[:i + 1], [full_path[i + 1]]))
+                for i in range(len(full_path) - 1):
+                    sequence_restrictions.append((2, full_path[:i + 1], [full_path[i + 1]])
                 sequence_restrictions.append((2, full_path, list(allowed_to)))
             else:
                 for to_arc in allowed_to:
