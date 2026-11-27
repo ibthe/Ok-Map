@@ -132,6 +132,7 @@ class OfflineAppSmokeTest {
                 failure.set(t)
             }
         }
-        failure.get()?.let { throw AssertionError("Activity layout smoke test failed", it) }
+        // Rethrow the original Android/MapLibre assertion so CI reports its exact cause.
+        failure.get()?.let { throw it }
     }
 }
