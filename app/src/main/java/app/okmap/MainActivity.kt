@@ -2205,61 +2205,72 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun readGpx(uri: Uri) {
-        try {
-            val p = Xml.newPullParser()
+        toast("Импортирую GPX…")
+        thread(name = "gpx-import") {
+            val importDb = UserDb(applicationContext)
             var wpts = 0
             var trks = 0
-            contentResolver.openInputStream(uri)?.use { stream ->
-                p.setInput(stream, null)
-                var inWpt = false
-                var inTrk = false
-                var inPt = false
-                var lat = 0.0
-                var lon = 0.0
-                var ele = Double.NaN
-                var ts = 0L
-                var name = ""
-                var wptFolder = UserDb.DEFAULT_FOLDER
-                var trkName = "Импорт GPX"
-                val pts = ArrayList<UserDb.Pt>()
-                val segments = ArrayList<List<UserDb.Pt>>()
-                var ev = p.eventType
-                while (ev != XmlPullParser.END_DOCUMENT) {
-                    if (ev == XmlPullParser.START_TAG) {
-                        when (p.name) {
-                            "wpt" -> { inWpt = true; name = ""; wptFolder = UserDb.DEFAULT_FOLDER; lat = p.getAttributeValue(null, "lat").toDouble(); lon = p.getAttributeValue(null, "lon").toDouble() }
-                            "trk" -> { inTrk = true; trkName = "Импорт GPX"; pts.clear(); segments.clear() }
-                            "trkseg" -> pts.clear()
-                            "trkpt" -> { inPt = true; ele = Double.NaN; ts = 0L; lat = p.getAttributeValue(null, "lat").toDouble(); lon = p.getAttributeValue(null, "lon").toDouble() }
-                            "name" -> { val t = p.nextText(); if (inWpt) name = t else if (inTrk && !inPt) trkName = t }
-                            "type" -> { val t = p.nextText(); if (inWpt) wptFolder = t.ifBlank { UserDb.DEFAULT_FOLDER } }
-                            "ele" -> { val t = p.nextText(); if (inPt) ele = t.toDoubleOrNull() ?: Double.NaN }
-                            "time" -> { val t = p.nextText(); if (inPt) ts = parseGpxTime(t) }
-                        }
-                    } else if (ev == XmlPullParser.END_TAG) {
-                        when (p.name) {
-                            "wpt" -> { userDb.addWaypoint(name.ifBlank { "Точка" }, lat, lon, wptFolder); inWpt = false; wpts++ }
-                            "trkpt" -> { pts.add(UserDb.Pt(lat, lon, ele, ts)); inPt = false }
-                            "trkseg" -> { if (pts.isNotEmpty()) segments.add(pts.toList()); pts.clear() }
-                            "trk" -> {
-                                if (pts.isNotEmpty()) segments.add(pts.toList()) // GPX files may omit trkseg
-                                segments.forEachIndexed { i, segment ->
-                                    val suffix = if (segments.size > 1) " · часть ${i + 1}" else ""
-                                    val id = userDb.newTrack(trkName + suffix)
-                                    userDb.addPoints(id, segment)
-                                    trks++
+            var error: String? = null
+            try {
+                val p = Xml.newPullParser()
+                contentResolver.openInputStream(uri)?.use { stream ->
+                    p.setInput(stream, null)
+                    var inWpt = false
+                    var inTrk = false
+                    var inPt = false
+                    var lat = 0.0
+                    var lon = 0.0
+                    var ele = Double.NaN
+                    var ts = 0L
+                    var name = ""
+                    var wptFolder = UserDb.DEFAULT_FOLDER
+                    var trkName = "Импорт GPX"
+                    val pts = ArrayList<UserDb.Pt>()
+                    val segments = ArrayList<List<UserDb.Pt>>()
+                    var ev = p.eventType
+                    while (ev != XmlPullParser.END_DOCUMENT) {
+                        if (ev == XmlPullParser.START_TAG) {
+                            when (p.name) {
+                                "wpt" -> { inWpt = true; name = ""; wptFolder = UserDb.DEFAULT_FOLDER; lat = p.getAttributeValue(null, "lat").toDouble(); lon = p.getAttributeValue(null, "lon").toDouble() }
+                                "trk" -> { inTrk = true; trkName = "Импорт GPX"; pts.clear(); segments.clear() }
+                                "trkseg" -> pts.clear()
+                                "trkpt" -> { inPt = true; ele = Double.NaN; ts = 0L; lat = p.getAttributeValue(null, "lat").toDouble(); lon = p.getAttributeValue(null, "lon").toDouble() }
+                                "name" -> { val t = p.nextText(); if (inWpt) name = t else if (inTrk && !inPt) trkName = t }
+                                "type" -> { val t = p.nextText(); if (inWpt) wptFolder = t.ifBlank { UserDb.DEFAULT_FOLDER } }
+                                "ele" -> { val t = p.nextText(); if (inPt) ele = t.toDoubleOrNull() ?: Double.NaN }
+                                "time" -> { val t = p.nextText(); if (inPt) ts = parseGpxTime(t) }
+                            }
+                        } else if (ev == XmlPullParser.END_TAG) {
+                            when (p.name) {
+                                "wpt" -> { importDb.addWaypoint(name.ifBlank { "Точка" }, lat, lon, wptFolder); inWpt = false; wpts++ }
+                                "trkpt" -> { pts.add(UserDb.Pt(lat, lon, ele, ts)); inPt = false }
+                                "trkseg" -> { if (pts.isNotEmpty()) segments.add(pts.toList()); pts.clear() }
+                                "trk" -> {
+                                    if (pts.isNotEmpty()) segments.add(pts.toList()) // GPX files may omit trkseg
+                                    segments.forEachIndexed { i, segment ->
+                                        val suffix = if (segments.size > 1) " · часть ${i + 1}" else ""
+                                        val id = importDb.newTrack(trkName + suffix)
+                                        importDb.addPoints(id, segment)
+                                        trks++
+                                    }
+                                    pts.clear(); segments.clear(); inTrk = false
                                 }
-                                pts.clear(); segments.clear(); inTrk = false
                             }
                         }
+                        ev = p.next()
                     }
-                    ev = p.next()
+                } ?: throw IllegalStateException("Не удалось открыть GPX-файл")
+            } catch (e: Exception) {
+                error = e.message ?: e.javaClass.simpleName
+            } finally {
+                try { importDb.close() } catch (_: Exception) {}
+            }
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) {
+                    refreshWaypoints()
+                    toast(if (error == null) "Импортировано: точек $wpts, треков $trks" else "Ошибка импорта: $error")
                 }
             }
-            refreshWaypoints()
-            toast("Импортировано: точек $wpts, треков $trks")
-        } catch (e: Exception) {
-            toast("Ошибка импорта: ${e.message}")
         }
     }
 
