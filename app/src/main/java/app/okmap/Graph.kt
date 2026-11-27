@@ -38,10 +38,26 @@ object Maneuver {
 class Step(val type: Int, val text: String, val street: String, val pointIdx: Int, val exit: Int)
 
 class Route(
-    val lat: DoubleArray, val lon: DoubleArray, val cum: DoubleArray,
+    val lat: DoubleArray, val lon: DoubleArray, val cum: DoubleArray, val timeCum: DoubleArray,
     val steps: List<Step>, val seconds: Double
 ) {
     val distance: Double get() = cum[cum.size - 1]
+
+    /** Remaining travel time at a distance along the route, including road-class/surface penalties. */
+    fun remainingSeconds(along: Double): Double {
+        if (cum.size < 2) return 0.0
+        val d = along.coerceIn(0.0, distance)
+        var lo = 0
+        var hi = cum.lastIndex
+        while (lo + 1 < hi) {
+            val mid = (lo + hi) ushr 1
+            if (cum[mid] <= d) lo = mid else hi = mid
+        }
+        val span = cum[hi] - cum[lo]
+        val f = if (span <= 0.0) 0.0 else (d - cum[lo]) / span
+        val elapsed = timeCum[lo] + (timeCum[hi] - timeCum[lo]) * f
+        return max(0.0, seconds - elapsed)
+    }
 }
 
 /**
@@ -698,6 +714,19 @@ class Graph(file: File) {
         val n = la.n
         val cum = DoubleArray(n)
         for (i in 1 until n) cum[i] = cum[i - 1] + haversine(la.a[i - 1], lo.a[i - 1], la.a[i], lo.a[i])
+        // Distribute each leg's penalized travel time over its actual polyline pieces.
+        val timeCum = DoubleArray(n)
+        var legStart = 0
+        for ((i, leg) in legs.withIndex()) {
+            val legEnd = boundary[i].coerceAtLeast(legStart).coerceAtMost(n - 1)
+            val secondsPerMeter = cost(leg.seg, abs(leg.to - leg.from), avoidUnpaved) /
+                max(1e-6, abs(leg.to - leg.from))
+            for (j in legStart + 1..legEnd) {
+                timeCum[j] = timeCum[j - 1] + (cum[j] - cum[j - 1]) * secondsPerMeter
+            }
+            legStart = legEnd
+        }
+        val totalSeconds = timeCum.lastOrNull() ?: 0.0
 
         val steps = ArrayList<Step>()
         steps.add(Step(Maneuver.DEPART, maneuverText(Maneuver.DEPART, streetName(legs[0].seg), 0),
@@ -761,7 +790,7 @@ class Graph(file: File) {
             if (type >= 0) steps.add(Step(type, maneuverText(type, nameB, 0), nameB, idx, 0))
         }
         steps.add(Step(Maneuver.ARRIVE, maneuverText(Maneuver.ARRIVE, "", 0), "", n - 1, 0))
-        return Route(la.a.copyOf(n), lo.a.copyOf(n), cum, steps, seconds)
+        return Route(la.a.copyOf(n), lo.a.copyOf(n), cum, timeCum, steps, totalSeconds)
     }
 
     companion object {
