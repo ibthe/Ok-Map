@@ -15,6 +15,7 @@ import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.graphics.Color
+import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.widget.LinearLayout
 import android.widget.ImageButton
@@ -121,6 +122,11 @@ class MainActivity : AppCompatActivity() {
     private val importLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) readGpx(uri)
+        }
+
+    private val satelliteLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) importSatelliteMbtiles(uri)
         }
 
     // ============================================================ lifecycle
@@ -1096,6 +1102,213 @@ class MainActivity : AppCompatActivity() {
         return box
     }
 
+    private fun mbtilesZoomRange(file: File): String = try {
+        val db = SQLiteDatabase.openDatabase(file.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
+        db.use { d ->
+            fun value(name: String): Int? = d.rawQuery(
+                "select value from metadata where name=?", arrayOf(name)
+            ).use { c -> if (c.moveToFirst()) c.getString(0).toIntOrNull() else null }
+            val min = value("minzoom")
+            val max = value("maxzoom")
+            if (min != null && max != null) "$min–$max" else "не указан"
+        }
+    } catch (_: Exception) { "неизвестен" }
+
+    private fun showOfflineDataManager() {
+        val mapFile = File(filesDir, "map.mbtiles")
+        val satFile = File(filesDir, "sat.mbtiles")
+        val reliefFile = File(filesDir, "relief.mbtiles")
+        val contoursFile = File(filesDir, "contours.mbtiles")
+        val placesFile = File(filesDir, "places.db")
+        val graphFile = File(filesDir, "graph.bin")
+        val bounds = try {
+            val db = SQLiteDatabase.openDatabase(mapFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
+            db.use { d ->
+                d.rawQuery("select value from metadata where name='bounds'", null).use { c ->
+                    if (c.moveToFirst()) c.getString(0) else "не указаны"
+                }
+            }
+        } catch (_: Exception) { "недоступны" }
+        fun size(file: File) = if (file.exists()) "${file.length() / (1024 * 1024)} МБ" else "нет"
+        val summary = buildString {
+            append("Активный регион: Грузия\n")
+            append("Границы: ").append(bounds).append("\n")
+            append("Основная карта: ").append(size(mapFile)).append(" · zoom ").append(mbtilesZoomRange(mapFile)).append("\n")
+            append("Поиск: ").append(size(placesFile)).append("\n")
+            append("Дорожный граф: ").append(size(graphFile)).append("\n")
+            append("Рельеф: ").append(size(reliefFile)).append("\n")
+            append("Горизонтали: ").append(size(contoursFile)).append("\n")
+            append("Спутниковые снимки: ").append(size(satFile))
+            if (satFile.exists()) append(" · zoom ").append(mbtilesZoomRange(satFile))
+        }
+        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(24))
+        }
+        root.addView(dragHandle())
+        root.addView(label("Офлайн-карты и данные", 22f, R.attr.gTextPrimary, true).apply {
+            setPadding(dp(4), dp(4), 0, dp(10))
+        })
+        root.addView(label(summary, 13f, R.attr.gTextSecondary).apply {
+            setPadding(dp(4), 0, dp(4), dp(12))
+        })
+        root.addView(keyButton("Проверить целостность данных", false) {
+            sheet.dismiss()
+            checkOfflineData()
+        }.apply { setPadding(dp(12), 0, dp(12), dp(3)) })
+        root.addView(keyButton("Установить / обновить спутниковые снимки", true) {
+            sheet.dismiss()
+            satelliteLauncher.launch(arrayOf("*/*"))
+        }.apply { setPadding(dp(12), 0, dp(12), dp(3)) })
+        if (satFile.exists()) {
+            root.addView(keyButton("Удалить спутниковые снимки", false) {
+                MaterialAlertDialogBuilder(this)
+                    .setTitle("Удалить спутниковые снимки?")
+                    .setMessage("Основная офлайн-карта и остальные данные останутся на устройстве.")
+                    .setNegativeButton("Отмена", null)
+                    .setPositiveButton("Удалить") { _, _ ->
+                        if (satFile.delete()) {
+                            if (mapType() == "sat") loadStyle()
+                            toast("Спутниковые снимки удалены")
+                        } else toast("Не удалось удалить файл снимков")
+                        sheet.dismiss()
+                    }.show()
+            }.apply { setPadding(dp(12), 0, dp(12), dp(3)) })
+        }
+        root.addView(note("Для установки выберите растровый MBTiles-файл с тайлами JPEG, PNG или WebP. Файл проверяется до замены текущих снимков; интернет приложению не требуется."))
+        val scroll = object : android.widget.ScrollView(this) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                val cap = minOf(dp(520), (resources.displayMetrics.heightPixels - dp(160)).coerceAtLeast(dp(96)))
+                super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(cap, MeasureSpec.AT_MOST))
+            }
+        }.apply { addView(root, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)) }
+        sheet.setContentView(scroll)
+        styleSheet(sheet)
+        sheet.behavior.skipCollapsed = true
+        sheet.setOnShowListener { sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED }
+        sheet.show()
+    }
+
+    private fun validateSatelliteMbtiles(file: File): Int {
+        require(file.exists() && file.length() > 1024) { "Файл пустой или слишком маленький" }
+        val db = SQLiteDatabase.openDatabase(file.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
+        return db.use { d ->
+            val integrity = d.rawQuery("PRAGMA quick_check", null).use { c -> if (c.moveToFirst()) c.getString(0) else "" }
+            require(integrity == "ok") { "Ошибка целостности SQLite" }
+            val tables = HashSet<String>()
+            d.rawQuery("select name from sqlite_master where type='table'", null).use { c ->
+                while (c.moveToNext()) tables.add(c.getString(0))
+            }
+            require("metadata" in tables && "tiles" in tables) { "Это не MBTiles-файл" }
+            val count = d.rawQuery("select count(*) from tiles where tile_data is not null", null).use {
+                if (it.moveToFirst()) it.getInt(0) else 0
+            }
+            require(count > 0) { "В MBTiles нет растровых тайлов" }
+            var validImages = 0
+            d.rawQuery("select tile_data from tiles where tile_data is not null limit 16", null).use { c ->
+                while (c.moveToNext() && validImages == 0) {
+                    val bytes = c.getBlob(0)
+                    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    if (bitmap != null) {
+                        validImages++
+                        bitmap.recycle()
+                    }
+                }
+            }
+            require(validImages > 0) { "Не найдено ни одного читаемого изображения тайла" }
+            count
+        }
+    }
+
+    private fun importSatelliteMbtiles(uri: Uri) {
+        toast("Импортирую спутниковые снимки…")
+        thread(name = "satellite-mbtiles-import") {
+            val target = File(filesDir, "sat.mbtiles")
+            val tmp = File(filesDir, "sat.mbtiles.download")
+            val backup = File(filesDir, "sat.mbtiles.previous")
+            try {
+                tmp.delete()
+                val input = contentResolver.openInputStream(uri) ?: error("Не удалось открыть выбранный файл")
+                input.use { source -> tmp.outputStream().use { dest -> source.copyTo(dest) } }
+                val tileCount = validateSatelliteMbtiles(tmp)
+                val zoom = mbtilesZoomRange(tmp)
+                backup.delete()
+                if (target.exists() && !target.renameTo(backup)) error("Не удалось сохранить предыдущую версию снимков")
+                if (!tmp.renameTo(target)) {
+                    if (backup.exists()) backup.renameTo(target)
+                    error("Не удалось атомарно установить новый файл")
+                }
+                backup.delete()
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        loadStyle()
+                        toast("Спутниковые снимки установлены: $tileCount тайлов · zoom $zoom")
+                    }
+                }
+            } catch (e: Exception) {
+                tmp.delete()
+                if (!target.exists() && backup.exists()) backup.renameTo(target)
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) toast("Ошибка установки снимков: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private fun checkOfflineData() {
+        toast("Проверяю офлайн-данные…")
+        thread(name = "offline-data-check") {
+            val report = ArrayList<String>()
+            fun checkDb(name: String, table: String, required: Boolean) {
+                val file = File(filesDir, name)
+                if (!file.exists()) {
+                    report.add("$name: " + if (required) "ОТСУТСТВУЕТ" else "не установлен (необязательно)")
+                    return
+                }
+                try {
+                    val db = SQLiteDatabase.openDatabase(file.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
+                    val count = db.use { d ->
+                        val integrity = d.rawQuery("PRAGMA quick_check", null).use { c -> if (c.moveToFirst()) c.getString(0) else "" }
+                        check(integrity == "ok") { "quick_check: $integrity" }
+                        d.rawQuery("select count(*) from $table", null).use { c -> if (c.moveToFirst()) c.getLong(0) else 0L }
+                    }
+                    check(count > 0) { "таблица $table пуста" }
+                    report.add("$name: OK · $count записей")
+                } catch (e: Exception) {
+                    report.add("$name: ОШИБКА · ${e.message}")
+                }
+            }
+            checkDb("map.mbtiles", "tiles", true)
+            checkDb("places.db", "places", true)
+            checkDb("relief.mbtiles", "tiles", false)
+            checkDb("contours.mbtiles", "tiles", false)
+            checkDb("sat.mbtiles", "tiles", false)
+            val graph = File(filesDir, "graph.bin")
+            try {
+                if (!graph.exists() || graph.length() < 64) error("файл отсутствует или слишком мал")
+                val magic = java.io.RandomAccessFile(graph, "r").use { file ->
+                    val bytes = ByteArray(4)
+                    file.readFully(bytes)
+                    String(bytes, Charsets.US_ASCII)
+                }
+                check(magic == "OKG2") { "неизвестный формат $magic" }
+                report.add("graph.bin: OK · ${graph.length() / (1024 * 1024)} МБ")
+            } catch (e: Exception) {
+                report.add("graph.bin: ОШИБКА · ${e.message}")
+            }
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) {
+                    MaterialAlertDialogBuilder(this)
+                        .setTitle("Проверка офлайн-данных")
+                        .setMessage(report.joinToString("\n"))
+                        .setPositiveButton("Закрыть", null)
+                        .show()
+                }
+            }
+        }
+    }
+
     private fun showLayerManager() {
         val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
         val root = LinearLayout(this).apply {
@@ -1218,6 +1431,7 @@ class MainActivity : AppCompatActivity() {
                 0 -> {   // MAP: what is drawn
                     val langs = enabledLanguages().joinToString(" ") { it.name }
                     add(mapTypeSwitch())
+                    add(menuRow("Офлайн-карты и данные", null, "Регион, спутниковые снимки, проверка файлов", act { showOfflineDataManager() }))
                     add(menuRow("Слои карты", null, "Дороги, здания, вода, подписи и прозрачность", act { showLayerManager() }))
                     add(menuSwitch("3D-здания", prefs.getBoolean("map_3d", false), true,
                         "Объёмные здания по данным OSM; масштаб 15+") { on ->
