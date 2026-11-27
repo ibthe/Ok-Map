@@ -78,6 +78,16 @@ jobs:
             mapdata-v3-
             mapdata-v2-
 
+      # Keep the road graph in a separate cache keyed by its own builder. A graph-format
+      # change must not invalidate the much larger vector-tile / relief cache.
+      - name: Restore road graph cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            app/src/main/assets/graph.bin
+            app/src/main/assets/graph.stamp
+          key: roadgraph-v3-${{ hashFiles('tools/build_graph.py') }}
+
       # decided once, before anything is built (a file check per step would change mid-run)
       - name: Decide what has to be rebuilt
         id: need
@@ -155,6 +165,15 @@ jobs:
           # smoke test on the real graph: Tbilisi -> Kutaisi by road is roughly 230 km
           python tools/route_check.py app/src/main/assets/graph.bin 41.7151 44.8271 42.2679 42.7180 190 320
           cp /tmp/graph.stamp app/src/main/assets/graph.stamp
+
+      - name: Save road graph cache
+        if: steps.need.outputs.graph == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            app/src/main/assets/graph.bin
+            app/src/main/assets/graph.stamp
+          key: roadgraph-v3-${{ hashFiles('tools/build_graph.py') }}
 
       - name: Build relief tiles (hillshade + elevation readout)
         if: steps.need.outputs.relief == 'true'
