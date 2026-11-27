@@ -314,3 +314,25 @@ from_upstream = junction_graph.route(start_at_a, junction_target)
 assert from_upstream is not None and 1 in {k for k, _ in from_upstream[1]}, (
     "via-way only restriction stopped applying after actually traversing the from-way", from_upstream)
 print("junction-start routing and via-way context tests passed")
+
+
+# If the destination lies on a road leaving the exact start junction, route directly
+# along that partial segment rather than traversing it fully and looping back.
+direct_pts = [
+    (7001, 41.8200, 44.8000),
+    (7002, 41.8200, 44.8100),
+    (7003, 41.8210, 44.8150),
+]
+direct_data = bg.build([
+    ({"highway": "residential"}, direct_pts[:2], 710),
+    ({"highway": "residential"}, direct_pts[1:], 720),
+], min_component=1)
+direct_path = os.path.join(tempfile.mkdtemp(), "direct-junction.bin")
+bg.write(direct_data, direct_path)
+direct_graph = rc.Graph(direct_path)
+direct_start = (0.0, 0, float(direct_graph.LEN[0]) / 10.0)
+direct_end = direct_graph.snap(41.8205, 44.8125)
+direct_route = direct_graph.route(direct_start, direct_end)
+assert direct_end[1] == 1 and direct_route is not None and direct_route[1] == [(1, True)], (
+    "route failed to use the direct partial segment from its start junction", direct_end, direct_route)
+print("direct destination from junction test passed")
