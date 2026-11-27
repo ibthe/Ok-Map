@@ -562,9 +562,13 @@ class MainActivity : AppCompatActivity() {
                 PropertyFactory.fillExtrusionVerticalGradient(true)
             )
         }
-        // Keep the thin outline above the extrusion so roof/building edges remain legible.
-        if (s.getLayer("building") != null) s.addLayerAbove(layer, "building")
-        else s.addLayer(layer)
+        // In satellite mode extrusions must sit above the raster, while the building outline
+        // remains above them. In the vector-only style, keep the extrusion above the building fill.
+        when {
+            s.getLayer("sat-imagery") != null -> s.addLayerAbove(layer, "sat-imagery")
+            s.getLayer("building") != null -> s.addLayerAbove(layer, "building")
+            else -> s.addLayer(layer)
+        }
     }
 
     private fun set3dCamera(enabled: Boolean, zoomToBuildings: Boolean = false) {
