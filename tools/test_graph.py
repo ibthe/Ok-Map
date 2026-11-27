@@ -233,3 +233,31 @@ try:
 except ValueError:
     pass
 print("graph v1/v2/v3 compatibility and malformed v3 validation tests passed")
+
+
+# A relation with multiple ordered via-way members must preserve member order.
+multi_pts = {
+    "a": (4001, 41.7600, 44.8000), "b": (4002, 41.7600, 44.8100),
+    "c": (4003, 41.7650, 44.8200), "d": (4004, 41.7700, 44.8300),
+    "e": (4005, 41.7700, 44.8400),
+}
+multi_ways = [
+    ({"highway": "residential"}, [multi_pts["a"], multi_pts["b"]], 110),
+    ({"highway": "residential", "oneway": "yes"}, [multi_pts["b"], multi_pts["c"]], 120),
+    ({"highway": "residential", "oneway": "yes"}, [multi_pts["c"], multi_pts["d"]], 130),
+    ({"highway": "residential"}, [multi_pts["d"], multi_pts["e"]], 140),
+]
+multi_data = bg.build(multi_ways, min_component=1,
+                      via_way_restrictions=[(110, (120, 130), 140, "no_straight_on")])
+multi_path = os.path.join(tempfile.mkdtemp(), "multi-via.bin")
+bg.write(multi_data, multi_path)
+multi_graph = rc.Graph(multi_path)
+assert multi_data["sequence_restrictions"], "multiple ordered via ways were not resolved"
+assert multi_graph.route(multi_graph.snap(41.7600, 44.8050),
+                         multi_graph.snap(41.7700, 44.8350)) is None, (
+    "multi-member via-way restriction was not enforced")
+# Reversing via member order must not be silently normalized into a valid chain.
+reversed_data = bg.build(multi_ways, min_component=1,
+                         via_way_restrictions=[(110, (130, 120), 140, "no_straight_on")])
+assert not reversed_data["sequence_restrictions"], "via-way member order was ignored"
+print("multiple ordered via-way members and order-sensitive resolution tests passed")
