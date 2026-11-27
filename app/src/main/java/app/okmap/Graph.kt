@@ -685,7 +685,7 @@ class Graph(file: File) {
         }
     }
 
-    fun buildRoute(legs: List<Leg>): Route {
+    fun buildRoute(legs: List<Leg>, avoidUnpaved: Boolean): Route {
         val la = DList()
         val lo = DList()
         val boundary = IntArray(legs.size)         // index of the last point of each leg in the polyline
@@ -693,7 +693,7 @@ class Graph(file: File) {
         for ((i, l) in legs.withIndex()) {
             appendSlice(l.seg, l.from, l.to, la, lo)
             boundary[i] = la.n - 1
-            seconds += abs(l.to - l.from) / (max(5, segKmh(l.seg)) / 3.6)
+            seconds += cost(l.seg, abs(l.to - l.from), avoidUnpaved)
         }
         val n = la.n
         val cum = DoubleArray(n)
