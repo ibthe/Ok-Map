@@ -2183,14 +2183,21 @@ class MainActivity : AppCompatActivity() {
                         out.write("<wpt lat=\"${w.lat}\" lon=\"${w.lon}\"><name>${esc(w.name)}</name><type>${esc(w.folder)}</type></wpt>\n")
                     }
                     for (t in exportDb.tracks()) {
-                        out.write("<trk><name>${esc(t.name)}</name><trkseg>\n")
+                        out.write("<trk><name>${esc(t.name)}</name>\n")
+                        var openSegment: Int? = null
                         exportDb.forEachTrackPoint(t.id) { p ->
+                            if (openSegment != p.segment) {
+                                if (openSegment != null) out.write("</trkseg>\n")
+                                out.write("<trkseg>\n")
+                                openSegment = p.segment
+                            }
                             out.write("<trkpt lat=\"${p.lat}\" lon=\"${p.lon}\">")
                             if (!p.ele.isNaN()) out.write("<ele>${p.ele}</ele>")
                             if (p.ts > 0) out.write("<time>${iso.format(Date(p.ts))}</time>")
                             out.write("</trkpt>\n")
                         }
-                        out.write("</trkseg></trk>\n")
+                        if (openSegment != null) out.write("</trkseg>\n")
+                        out.write("</trk>\n")
                     }
                     out.write("</gpx>\n")
                 }
@@ -2232,6 +2239,8 @@ class MainActivity : AppCompatActivity() {
                     var wptFolder = UserDb.DEFAULT_FOLDER
                     var trkName = "Импорт GPX"
                     var currentTrackId = 0L
+                    var segmentIndex = 0
+                    var hasTrackSegment = false
                     val batch = ArrayList<UserDb.Pt>(1000)
 
                     fun coordinate(attribute: String, min: Double, max: Double): Double {
@@ -2268,11 +2277,14 @@ class MainActivity : AppCompatActivity() {
                                     inTrk = true
                                     trkName = "Импорт GPX"
                                     currentTrackId = 0L
+                                    segmentIndex = 0
+                                    hasTrackSegment = false
                                     batch.clear()
                                 }
                                 "trkseg" -> {
                                     flushTrackPoints()
-                                    currentTrackId = 0L
+                                    if (hasTrackSegment) segmentIndex++
+                                    hasTrackSegment = true
                                 }
                                 "trkpt" -> {
                                     inPt = true
@@ -2306,17 +2318,18 @@ class MainActivity : AppCompatActivity() {
                                     wpts++
                                 }
                                 "trkpt" -> {
-                                    batch.add(UserDb.Pt(lat, lon, ele, ts))
+                                    batch.add(UserDb.Pt(lat, lon, ele, ts, segmentIndex))
                                     inPt = false
                                     if (batch.size >= 1000) flushTrackPoints()
                                 }
                                 "trkseg" -> {
                                     flushTrackPoints()
-                                    currentTrackId = 0L
                                 }
                                 "trk" -> {
                                     flushTrackPoints()
                                     currentTrackId = 0L
+                                    segmentIndex = 0
+                                    hasTrackSegment = false
                                     inTrk = false
                                 }
                             }
