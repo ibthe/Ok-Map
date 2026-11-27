@@ -213,9 +213,14 @@ jobs:
           python -m pip install --quiet osmium numpy
           python tools/build_graph.py data/region.osm.pbf app/src/main/assets/graph.bin
           ls -lh app/src/main/assets/graph.bin
-          # smoke test on the real graph: Tbilisi -> Kutaisi by road is roughly 230 km
-          python tools/route_check.py app/src/main/assets/graph.bin 41.7151 44.8271 42.2679 42.7180 190 320
           cp /tmp/graph.stamp app/src/main/assets/graph.stamp
+
+      # Validate the actual bundled road graph on every run, including cache hits.
+      # Synthetic tests alone cannot detect a stale, truncated, or incompatible cached graph.
+      - name: Validate offline road graph (cached or freshly built)
+        run: |
+          test -s app/src/main/assets/graph.bin || { echo "Required graph.bin is missing"; exit 1; }
+          python tools/route_check.py app/src/main/assets/graph.bin 41.7151 44.8271 42.2679 42.7180 190 320
 
       - name: Save road graph cache
         if: steps.need.outputs.graph == 'true'
