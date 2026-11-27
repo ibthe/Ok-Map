@@ -120,7 +120,7 @@ private class RestrictionAutomaton(restrictions: List<SequenceRestriction>) {
     fun blocks(state: Int, arc: Int): Boolean {
         val allowed = onlyAllowed[state]
         if (allowed != null && arc !in allowed) return true
-        return forbidden(next(state, arc))
+        return forbidden[next(state, arc)]
     }
 }
 
