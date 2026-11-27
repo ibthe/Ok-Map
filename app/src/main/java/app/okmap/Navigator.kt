@@ -301,9 +301,26 @@ class Navigator(
             }
         }
         val tolerance = max(35.0, l.accuracy * 1.5)
-        if (bestD <= tolerance) {
+        val onRoute = bestD <= tolerance
+        if (onRoute) {
             offCount = 0
-            if (bestAlong >= along - 20.0) { progressIdx = bestJ; along = max(along, bestAlong) }
+            // Permit real reverse travel along the route; otherwise progress can stay near
+            // the destination forever after a U-turn and falsely announce arrival.
+            var movingAgainstRoute = false
+            if (l.hasBearing() && l.hasSpeed() && l.speed > 3f && bestJ < n - 1) {
+                val routeBearing = FloatArray(3)
+                Location.distanceBetween(r.lat[bestJ], r.lon[bestJ],
+                    r.lat[bestJ + 1], r.lon[bestJ + 1], routeBearing)
+                val delta = kotlin.math.abs((l.bearing - routeBearing[0] + 540f) % 360f - 180f)
+                movingAgainstRoute = delta > 115f
+            }
+            if (bestAlong >= along - 20.0) {
+                progressIdx = bestJ
+                along = max(along, bestAlong)
+            } else if (movingAgainstRoute) {
+                progressIdx = bestJ
+                along = bestAlong
+            }
         } else {
             offCount++
             val now = System.currentTimeMillis()
@@ -315,9 +332,15 @@ class Navigator(
             }
         }
         updateGuidance(l)
-        if (r.distance - along < 25.0) {
-            speak("Вы прибыли в пункт назначения")
-            toast("Вы прибыли")
+        if (onRoute && r.distance - bestAlong < 25.0) {
+            if (connEnd > 50.0) {
+                val message = "Маршрут по дорогам завершён. До точки назначения ещё ${Geo.fmtDist(connEnd)} по прямой"
+                speak(message)
+                toast(message)
+            } else {
+                speak("Вы прибыли в пункт назначения")
+                toast("Вы прибыли")
+            }
             stop()
             return
         }
