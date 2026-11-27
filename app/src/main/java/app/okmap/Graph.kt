@@ -65,10 +65,10 @@ class Route(
  * The file is memory-mapped, so the whole country costs almost no Java heap.
  * Algorithm and file layout are mirrored by tools/route_check.py, which is tested in CI.
  */
-private data class SequenceRestriction(val type: Int, val prefix: IntArray, val allowed: IntArray)
+internal data class SequenceRestriction(val type: Int, val prefix: IntArray, val allowed: IntArray)
 
 /** Aho-Corasick automaton over directed road arcs; supports overlapping via-way restrictions. */
-private class RestrictionAutomaton(restrictions: List<SequenceRestriction>) {
+internal class RestrictionAutomaton(restrictions: List<SequenceRestriction>) {
     private val edges = ArrayList<HashMap<Int, Int>>()
     private val fail = ArrayList<Int>()
     private val forbidden = ArrayList<Boolean>()
