@@ -303,16 +303,14 @@ def build(ways, min_component=40, cell=5000, restrictions=(), via_way_restrictio
             exits = [a for a in outgoing_osm.get(node, ()) if arc_way[a] == next_way]
             if exits:
                 if idx + 1 == len(via_ways):
-                    for out_arc in exits:
-                        resolved.append((prefix, out_arc))
-                        if len(resolved) > 1:
-                            ambiguous = True
-                            return
+                    resolved.append((tuple(prefix), tuple(sorted(exits))))
+                    if len(resolved) > 1:
+                        ambiguous = True
+                        return
                 else:
-                    for out_arc in exits:
-                        walk_way(node, idx + 1, previous_arc, prefix, visited)
-                        if ambiguous:
-                            return
+                    walk_way(node, idx + 1, previous_arc, prefix, visited)
+                    if ambiguous:
+                        return
             for arc in outgoing_osm.get(node, ()):
                 if arc_way[arc] != via_ways[idx] or arc == (previous_arc ^ 1):
                     continue
@@ -340,14 +338,14 @@ def build(ways, min_component=40, cell=5000, restrictions=(), via_way_restrictio
                     break
             if ambiguous or len(resolved) != 1:
                 continue
-            via_prefix, to_arc = resolved[0]
-            prefix = [from_arc] + via_prefix
+            via_prefix, allowed_to = resolved[0]
+            prefix = [from_arc] + list(via_prefix)
             if kind.startswith("only_"):
-                sequence_restrictions.append((2, prefix, [to_arc]))
+                sequence_restrictions.append((2, prefix, list(allowed_to)))
             else:
-                sequence_restrictions.append((1, prefix + [to_arc], []))
+                for to_arc in allowed_to:
+                    sequence_restrictions.append((1, prefix + [to_arc], []))
 
-    # De-duplicate identical relation paths while preserving deterministic output.
     unique_sequences = {}
     for rtype, prefix, allowed in sequence_restrictions:
         unique_sequences[(rtype, tuple(prefix), tuple(allowed))] = None
