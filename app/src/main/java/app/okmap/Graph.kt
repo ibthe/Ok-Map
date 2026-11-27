@@ -607,7 +607,7 @@ class Graph(file: File) {
             if (node == segA(ke) && canForward(ke)) {
                 val endArc = 2 * ke
                 val tail = adjustedCost(ke, e.off, endArc)
-                if (!forbiddenTurn(inArc, endArc, activeConditional) && !restrictionAutomaton.blocks(acState, endArc) &&
+                if (!forbiddenTurn(inArc = inArc, outArc = endArc, activeConditional = activeConditional) && !restrictionAutomaton.blocks(acState, endArc) &&
                     currentCost + tail < best) {
                     best = currentCost + tail; bestState = state; bestEndArc = endArc
                 }
@@ -615,7 +615,7 @@ class Graph(file: File) {
             if (node == segB(ke) && canBackward(ke)) {
                 val endArc = 2 * ke + 1
                 val tail = adjustedCost(ke, le - e.off, endArc)
-                if (!forbiddenTurn(inArc, endArc, activeConditional) && !restrictionAutomaton.blocks(acState, endArc) &&
+                if (!forbiddenTurn(inArc = inArc, outArc = endArc, activeConditional = activeConditional) && !restrictionAutomaton.blocks(acState, endArc) &&
                     currentCost + tail < best) {
                     best = currentCost + tail; bestState = state; bestEndArc = endArc
                 }
@@ -627,7 +627,7 @@ class Graph(file: File) {
                 if (segA(k) == node && canForward(k)) { outArc = 2 * k; next = segB(k) }
                 else if (segB(k) == node && canBackward(k)) { outArc = 2 * k + 1; next = segA(k) }
                 else continue
-                if (forbiddenTurn(inArc, outArc, activeConditional) || restrictionAutomaton.blocks(acState, outArc)) continue
+                if (forbiddenTurn(inArc = inArc, outArc = outArc, activeConditional = activeConditional) || restrictionAutomaton.blocks(acState, outArc)) continue
                 val nextAc = restrictionAutomaton.next(acState, outArc)
                 if (restrictionAutomaton.isForbidden(nextAc)) continue
                 val nextState = key(outArc, nextAc)
