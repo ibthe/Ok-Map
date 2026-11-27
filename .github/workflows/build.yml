@@ -126,7 +126,13 @@ jobs:
           CH=$(cat tools/build_contours.py | sha1sum | cut -d' ' -f1)
           echo "$CH" > /tmp/contours.stamp
           [ "$(cat app/src/main/assets/contours.stamp 2>/dev/null)" = "$CH" ] || echo "contours=true" >> "$GITHUB_OUTPUT"
-          SH=$(printf '%s|%s|%s|%s' "$(cat tools/build_satellite.py | sha1sum)" "$SAT_TILES" "$SAT_ZOOM" "$SAT_MIN_ZOOM" "$SAT_DETAIL" | sha1sum | cut -d' ' -f1)
+          SAT_BUILDER_HASH="$(cat tools/build_satellite.py | sha1sum)"
+          if [ "$SAT_MIN_ZOOM" = "10" ]; then
+            # Preserve the existing default-zoom cache while still tracking custom min-zoom builds.
+            SH=$(printf '%s|%s|%s|%s' "$SAT_BUILDER_HASH" "$SAT_TILES" "$SAT_ZOOM" "$SAT_DETAIL" | sha1sum | cut -d' ' -f1)
+          else
+            SH=$(printf '%s|%s|%s|%s|%s' "$SAT_BUILDER_HASH" "$SAT_TILES" "$SAT_ZOOM" "$SAT_MIN_ZOOM" "$SAT_DETAIL" | sha1sum | cut -d' ' -f1)
+          fi
           echo "$SH" > /tmp/sat.stamp
           [ "$SAT_TILES" != "none" ] && { [ -s app/src/main/assets/sat.mbtiles ] || echo "sat=true" >> "$GITHUB_OUTPUT"; [ "$(cat app/src/main/assets/sat.stamp 2>/dev/null)" = "$SH" ] || echo "sat=true" >> "$GITHUB_OUTPUT"; }
           [ -s app/src/main/assets/relief.mbtiles ] || echo "relief=true" >> "$GITHUB_OUTPUT"
