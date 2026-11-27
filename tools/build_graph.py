@@ -469,8 +469,9 @@ def read_pbf(path):
             kind = car_restriction_kind(tags)
             if kind is None:
                 return
+            # Keep unsupported member types so malformed relations are rejected, not shortened.
             ordered = [(m.role, m.type, int(m.ref)) for m in r.members
-                       if m.role in ("from", "via", "to") and m.type in ("w", "n")]
+                       if m.role in ("from", "via", "to")]
             parsed_via = parse_via_way_members(ordered)
             if parsed_via is not None:
                 self.via_way_restrictions.append((*parsed_via, kind))
