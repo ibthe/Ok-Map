@@ -387,3 +387,48 @@ direct_route = direct_graph.route(direct_start, direct_end)
 assert direct_end[1] == 1 and direct_route is not None and direct_route[1] == [(1, True)], (
     "route failed to use the direct partial segment from its start junction", direct_end, direct_route)
 print("direct destination from junction test passed")
+
+
+# OSM car access hierarchy and explicit reverse one-way overrides.
+assert bg.way_rules({"highway": "residential", "access": "private"}) is None
+assert bg.way_rules({"highway": "residential", "access": "private", "motorcar": "yes"}) is not None
+assert bg.way_rules({"highway": "residential", "access": "yes", "motorcar": "private"}) is None
+assert bg.way_rules({"highway": "residential", "access": "private", "motor_vehicle": "destination"}) is not None
+assert bg.way_rules({"highway": "residential", "access": "private", "vehicle": "yes"}) is not None
+
+motorway_reverse = bg.way_rules({"highway": "motorway", "oneway": "-1"})[2]
+assert motorway_reverse & bg.F_BACK and not motorway_reverse & bg.F_FWD, motorway_reverse
+roundabout_reverse = bg.way_rules({"highway": "residential", "junction": "roundabout", "oneway": "-1"})[2]
+assert roundabout_reverse & bg.F_BACK and not roundabout_reverse & bg.F_FWD, roundabout_reverse
+roundabout_two_way = bg.way_rules({"highway": "residential", "junction": "roundabout", "oneway": "no"})[2]
+assert roundabout_two_way & bg.F_BACK and roundabout_two_way & bg.F_FWD, roundabout_two_way
+print("car access hierarchy and one-way override tests passed")
+
+
+# Avoiding unpaved roads must compare a same-segment track with a faster paved detour.
+route_pts = {
+    "start": (9001, 41.7000, 44.8000),
+    "end": (9002, 41.7000, 44.8100),
+    "north": (9003, 41.7100, 44.8050),
+}
+route_data = bg.build([
+    ({"highway": "track", "maxspeed": "50"}, [route_pts["start"], route_pts["end"]], 901),
+    ({"highway": "residential"}, [route_pts["start"], route_pts["north"], route_pts["end"]], 902),
+], min_component=1)
+route_path = os.path.join(tempfile.mkdtemp(), "unpaved-detour.bin")
+bg.write(route_data, route_path)
+route_graph = rc.Graph(route_path)
+route_start = route_graph.snap(route_pts["start"][1], route_pts["start"][2])
+route_end = route_graph.snap(route_pts["end"][1], route_pts["end"][2])
+assert route_start[1] == route_end[1] == 0, (route_start, route_end)
+avoid_route = route_graph.route(route_start, route_end, avoid_unpaved=True)
+allow_route = route_graph.route(route_start, route_end, avoid_unpaved=False)
+assert avoid_route is not None and allow_route is not None
+track_seconds = route_graph.cost(0, route_graph.LEN[0] / 10.0, avoid_unpaved=True)
+assert avoid_route[0] < track_seconds - 1.0, ("avoid_unpaved kept the slower direct track", avoid_route, track_seconds)
+assert {1, 2}.issubset({k for k, _ in avoid_route[1]}), ("paved detour was not selected", avoid_route)
+assert abs(allow_route[0] - route_graph.cost(0, route_graph.LEN[0] / 10.0, avoid_unpaved=False)) < 1e-6
+assert allow_route[1] == [(0, True)], allow_route
+far_snap = route_graph.snap(43.0, 46.0)
+assert far_snap is not None, "reference snap must use the same whole-network fallback as Kotlin"
+print("same-segment paved detour, surface penalty and snap fallback tests passed")

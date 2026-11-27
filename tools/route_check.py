@@ -10,7 +10,8 @@ import sys
 import numpy as np
 
 PEN = {10: 2.5}          # class id -> time multiplier (tracks are a last resort)
-UNPAVED_PEN = 1.3
+UNPAVED_AVOID_PEN = 3.0
+UNPAVED_NORMAL_PEN = 1.3
 
 
 def hav(la1, lo1, la2, lo2):
@@ -111,10 +112,31 @@ class Graph:
         pts.append((self.nlat[self.B[k]] / 1e6, self.nlon[self.B[k]] / 1e6))
         return pts
 
-    def snap(self, lat, lon, max_cells=12):
-        cy, cx = (int(lat * 1e6) - self.lat0) // self.cell, (int(lon * 1e6) - self.lon0) // self.cell
-        best = None
+    def _snap_to_segment(self, kseg, lat, lon, k):
+        pts, off = self.shape(kseg), 0.0
+        best_planar, best_off = float("inf"), 0.0
+        best_lat = best_lon = 0.0
+        for p, q in zip(pts, pts[1:]):
+            ax, ay = (p[1] - lon) * k, p[0] - lat
+            dx, dy = (q[1] - p[1]) * k, q[0] - p[0]
+            l2 = dx * dx + dy * dy
+            t = 0.0 if l2 == 0 else max(0.0, min(1.0, -(ax * dx + ay * dy) / l2))
+            planar = math.hypot(ax + t * dx, ay + t * dy) * 111320.0
+            seg_len = hav(p[0], p[1], q[0], q[1])
+            if planar < best_planar:
+                best_planar = planar
+                best_off = off + t * seg_len
+                best_lat = p[0] + (q[0] - p[0]) * t
+                best_lon = p[1] + (q[1] - p[1]) * t
+            off += seg_len
+        return hav(lat, lon, best_lat, best_lon), int(kseg), best_off
+
+    def snap(self, lat, lon, max_cells=40):
+        cy = math.trunc((math.floor(lat * 1e6) - self.lat0) / self.cell)
+        cx = math.trunc((math.floor(lon * 1e6) - self.lon0) / self.cell)
         k = math.cos(math.radians(lat))
+        cell_meters = self.cell * 1e-6 * 111320.0 * min(1.0, k)
+        best = None
         for r in range(max_cells):
             for y in range(cy - r, cy + r + 1):
                 for x in range(cx - r, cx + r + 1):
@@ -122,23 +144,30 @@ class Graph:
                         continue
                     c = y * self.W + x
                     for kseg in self.cell_data[self.cell_start[c]:self.cell_start[c + 1]]:
-                        pts, off = self.shape(kseg), 0.0
-                        for p, q in zip(pts, pts[1:]):
-                            ax, ay, bx, by = (p[1] - lon) * k, p[0] - lat, (q[1] - lon) * k, q[0] - lat
-                            dx, dy = bx - ax, by - ay
-                            L2 = dx * dx + dy * dy
-                            t = 0 if L2 == 0 else max(0.0, min(1.0, -(ax * dx + ay * dy) / L2))
-                            d = math.hypot(ax + t * dx, ay + t * dy) * 111320
-                            seg_len = hav(p[0], p[1], q[0], q[1])
-                            if best is None or d < best[0]:
-                                best = (d, int(kseg), off + t * seg_len)
-                            off += seg_len
-            if best is not None and best[0] <= r * self.cell * 1e-6 * 111320 * min(1.0, k):
+                        candidate = self._snap_to_segment(int(kseg), lat, lon, k)
+                        if best is None or candidate[0] < best[0]:
+                            best = candidate
+            if best is not None and best[0] <= r * cell_meters:
                 break
+        if best is not None:
+            return best
+
+        # Match Graph.kt: if the local grid has no road, use the nearest junction in the network.
+        if self.N == 0:
+            return None
+        bn = min(range(self.N), key=lambda i:
+                 (self.nlat[i] / 1e6 - lat) ** 2 +
+                 ((self.nlon[i] / 1e6 - lon) * k) ** 2)
+        for i in range(int(self.adj_start[bn]), int(self.adj_start[bn + 1])):
+            candidate = self._snap_to_segment(int(self.adj[i]), lat, lon, k)
+            if best is None or candidate[0] < best[0]:
+                best = candidate
         return best
 
-    def cost(self, k, meters):
-        mult = PEN.get((self.FLG[k] >> 2) & 15, 1.0) * (UNPAVED_PEN if self.FLG[k] & 128 else 1.0)
+    def cost(self, k, meters, avoid_unpaved=True):
+        mult = PEN.get((self.FLG[k] >> 2) & 15, 1.0)
+        if self.FLG[k] & 128:
+            mult *= UNPAVED_AVOID_PEN if avoid_unpaved else UNPAVED_NORMAL_PEN
         return meters / (self.KMH[k] / 3.6) * mult
 
     def _ac_next(self, state, arc):
@@ -152,18 +181,12 @@ class Graph:
             return True
         return self.ac_bad[self._ac_next(state, arc)]
 
-    def route(self, s, e):
+    def route(self, s, e, avoid_unpaved=True):
         """A*: state is (incoming directed arc, via-way restriction automaton state)."""
         _, ks, os_ = s
         _, ke, oe = e
         Lk, Le = self.LEN[ks] / 10.0, self.LEN[ke] / 10.0
         INF = float("inf")
-        if ks == ke:
-            if oe >= os_ and self.FLG[ks] & 1:
-                return self.cost(ks, oe - os_), [(ks, True)]
-            if oe < os_ and self.FLG[ks] & 2:
-                return self.cost(ks, os_ - oe), [(ks, False)]
-
         def arc_end(arc):
             k = arc // 2
             return int(self.B[k] if arc % 2 == 0 else self.A[k])
@@ -190,14 +213,14 @@ class Graph:
             start_node = int(self.A[ks] if os_ <= 1.0 else self.B[ks])
             for k in self.adj[self.adj_start[start_node]:self.adj_start[start_node + 1]]:
                 if self.A[k] == start_node and self.FLG[k] & 1:
-                    starts.append((2 * int(k), self.cost(int(k), self.LEN[k] / 10.0)))
+                    starts.append((2 * int(k), self.cost(int(k), self.LEN[k] / 10.0, avoid_unpaved)))
                 elif self.B[k] == start_node and self.FLG[k] & 2:
-                    starts.append((2 * int(k) + 1, self.cost(int(k), self.LEN[k] / 10.0)))
+                    starts.append((2 * int(k) + 1, self.cost(int(k), self.LEN[k] / 10.0, avoid_unpaved)))
         else:
             if self.FLG[ks] & 2:
-                starts.append((2 * ks + 1, self.cost(ks, os_)))
+                starts.append((2 * ks + 1, self.cost(ks, os_, avoid_unpaved)))
             if self.FLG[ks] & 1:
-                starts.append((2 * ks, self.cost(ks, Lk - os_)))
+                starts.append((2 * ks, self.cost(ks, Lk - os_, avoid_unpaved)))
         for arc, cost in starts:
             ac = self._ac_next(0, arc)
             if self.ac_bad[ac]:
@@ -210,10 +233,21 @@ class Graph:
 
         best, best_state, best_end_arc = INF, None, None
         direct_start_leg = None
+        # Same-segment travel is a candidate; A* may find a faster paved detour.
+        if ks == ke:
+            if oe >= os_ and self.FLG[ks] & 1:
+                best = self.cost(ks, oe - os_, avoid_unpaved)
+                direct_start_leg = (ks, True)
+            if oe < os_ and self.FLG[ks] & 2:
+                direct = self.cost(ks, os_ - oe, avoid_unpaved)
+                if direct < best:
+                    best, direct_start_leg = direct, (ks, False)
         if start_at_node and int(self.A[ke]) == start_node and self.FLG[ke] & 1:
-            best, direct_start_leg = self.cost(ke, oe), (ke, True)
+            direct = self.cost(ke, oe, avoid_unpaved)
+            if direct < best:
+                best, direct_start_leg = direct, (ke, True)
         if start_at_node and int(self.B[ke]) == start_node and self.FLG[ke] & 2:
-            direct = self.cost(ke, Le - oe)
+            direct = self.cost(ke, Le - oe, avoid_unpaved)
             if direct < best:
                 best, direct_start_leg = direct, (ke, False)
         done = set()
@@ -228,9 +262,9 @@ class Graph:
             node = arc_end(in_arc)
             end_options = []
             if node == int(self.A[ke]) and self.FLG[ke] & 1:
-                end_options.append((2 * ke, self.cost(ke, oe)))
+                end_options.append((2 * ke, self.cost(ke, oe, avoid_unpaved)))
             if node == int(self.B[ke]) and self.FLG[ke] & 2:
-                end_options.append((2 * ke + 1, self.cost(ke, Le - oe)))
+                end_options.append((2 * ke + 1, self.cost(ke, Le - oe, avoid_unpaved)))
             for end_arc, tail_cost in end_options:
                 if ((in_arc, end_arc) not in self.turns and
                     not self._ac_blocked(ac_state, end_arc) and
@@ -250,7 +284,7 @@ class Graph:
                 next_state = (out_arc, ac_next)
                 if next_state in done:
                     continue
-                candidate = dist[state] + self.cost(int(k), self.LEN[k] / 10.0)
+                candidate = dist[state] + self.cost(int(k), self.LEN[k] / 10.0, avoid_unpaved)
                 if candidate < dist.get(next_state, INF):
                     dist[next_state] = candidate
                     prev[next_state] = state
