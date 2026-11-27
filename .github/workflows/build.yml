@@ -364,13 +364,19 @@ jobs:
       # and first-launch map-data extraction on a real Android runtime.
       - name: Run Android emulator smoke tests
         uses: reactivecircus/android-emulator-runner@v2
-        timeout-minutes: 20
+        timeout-minutes: 30
+        env:
+          # Standard GitHub-hosted Linux runners do not expose /dev/kvm.
+          # Emulator 37.3+ requires this opt-in to allow slow TCG fallback.
+          ANDROID_I_WANT_MY_TCG: yes
         with:
           api-level: 34
           target: google_apis
           arch: x86_64
           profile: pixel_2
           disable-animations: true
+          disable-linux-hw-accel: true
+          emulator-boot-timeout: 600
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: gradle --no-daemon :app:connectedDebugAndroidTest
 

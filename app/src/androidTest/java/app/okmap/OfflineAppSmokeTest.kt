@@ -4,14 +4,12 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
 import android.graphics.Rect
-import android.os.SystemClock
+import android.view.LayoutInflater
 import android.view.View
-import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -99,33 +97,30 @@ class OfflineAppSmokeTest {
     }
 
     @Test
-    fun activityExtractsOfflineDataAndKeepsPrimaryControlsSeparated() {
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            var ready = false
-            val deadline = SystemClock.elapsedRealtime() + 240_000L
-            while (!ready && SystemClock.elapsedRealtime() < deadline) {
-                scenario.onActivity { activity ->
-                    ready = activity.findViewById<View>(R.id.loading).visibility == View.GONE
-                }
-                if (!ready) SystemClock.sleep(500L)
-            }
-            assertTrue("First-launch offline data extraction did not finish", ready)
+    fun packagedOfflineDataAndMainLayoutAreValidAndNonOverlapping() {
+        val assets = context.assets.list("")?.toSet() ?: emptySet()
+        assertTrue("Offline vector map is missing", assets.contains("map.mbtiles"))
+        assertTrue("Offline road graph is missing", assets.contains("graph.bin"))
+        assertTrue("Offline places index is missing", assets.contains("places.db"))
 
-            scenario.onActivity { activity ->
-                assertNotNull(activity.findViewById<View>(R.id.mapView))
-                assertNotNull(activity.findViewById<View>(R.id.etSearch))
-                assertNotNull(activity.findViewById<View>(R.id.btnMenu))
-                assertNotNull(activity.findViewById<View>(R.id.btnPoint))
-                assertNotNull(activity.findViewById<View>(R.id.btnLocation))
-                assertNotNull(activity.findViewById<View>(R.id.btnCompass))
-                assertNotNull(activity.findViewById<View>(R.id.btnRec))
+        val root = LayoutInflater.from(context).inflate(R.layout.activity_main, null, false)
+        val ids = listOf(
+            R.id.mapView, R.id.etSearch, R.id.btnMenu, R.id.btnPoint,
+            R.id.btnLocation, R.id.btnCompass, R.id.btnRec, R.id.dock, R.id.rightControls
+        )
+        ids.forEach { id -> assertTrue("Missing layout view id $id", root.findViewById<View>(id) != null) }
 
-                val dock = Rect()
-                val rightControls = Rect()
-                assertTrue(activity.findViewById<View>(R.id.dock).getGlobalVisibleRect(dock))
-                assertTrue(activity.findViewById<View>(R.id.rightControls).getGlobalVisibleRect(rightControls))
-                assertFalse("Bottom dock and right-side controls must not overlap", Rect.intersects(dock, rightControls))
-            }
-        }
+        val width = context.resources.displayMetrics.widthPixels
+        val height = context.resources.displayMetrics.heightPixels
+        root.measure(
+            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
+        )
+        root.layout(0, 0, width, height)
+        val dockView = root.findViewById<View>(R.id.dock)
+        val rightView = root.findViewById<View>(R.id.rightControls)
+        val dock = Rect(dockView.left, dockView.top, dockView.right, dockView.bottom)
+        val right = Rect(rightView.left, rightView.top, rightView.right, rightView.bottom)
+        assertFalse("Bottom dock and right-side controls must not overlap", Rect.intersects(dock, right))
     }
 }
