@@ -140,8 +140,19 @@ class Graph:
         mult = PEN.get((self.FLG[k] >> 2) & 15, 1.0) * (UNPAVED_PEN if self.FLG[k] & 128 else 1.0)
         return meters / (self.KMH[k] / 3.6) * mult
 
+    def _ac_next(self, state, arc):
+        while state and arc not in self.ac_edges[state]:
+            state = self.ac_fail[state]
+        return self.ac_edges[state].get(arc, 0)
+
+    def _ac_blocked(self, state, arc):
+        allowed = self.ac_only[state]
+        if allowed is not None and arc not in allowed:
+            return True
+        return self.ac_bad[self._ac_next(state, arc)]
+
     def route(self, s, e):
-        """Arc-state A*: turn restrictions are checked on (incoming_arc, outgoing_arc)."""
+        """A*: state is (incoming directed arc, via-way restriction automaton state)."""
         _, ks, os_ = s
         _, ke, oe = e
         Lk, Le = self.LEN[ks] / 10.0, self.LEN[ke] / 10.0
@@ -178,28 +189,35 @@ class Graph:
         if self.FLG[ks] & 1:
             starts.append((2 * ks, self.cost(ks, Lk - os_)))
         for arc, cost in starts:
-            if cost < dist.get(arc, INF):
-                dist[arc] = cost
-                prev[arc] = None
-                heapq.heappush(heap, (cost + heuristic(arc_end(arc)), arc))
+            ac = self._ac_next(0, arc)
+            if self.ac_bad[ac]:
+                continue
+            state = (arc, ac)
+            if cost < dist.get(state, INF):
+                dist[state] = cost
+                prev[state] = None
+                heapq.heappush(heap, (cost + heuristic(arc_end(arc)), state))
 
         best, best_state, best_end_arc = INF, None, None
         done = set()
         while heap:
             estimate, state = heapq.heappop(heap)
-            if state in done:
-                continue
             if estimate >= best:
                 break
+            if state in done:
+                continue
             done.add(state)
-            node = arc_end(state)
+            in_arc, ac_state = state
+            node = arc_end(in_arc)
             end_options = []
             if node == int(self.A[ke]) and self.FLG[ke] & 1:
                 end_options.append((2 * ke, self.cost(ke, oe)))
             if node == int(self.B[ke]) and self.FLG[ke] & 2:
                 end_options.append((2 * ke + 1, self.cost(ke, Le - oe)))
             for end_arc, tail_cost in end_options:
-                if (state, end_arc) not in self.turns and dist[state] + tail_cost < best:
+                if ((in_arc, end_arc) not in self.turns and
+                    not self._ac_blocked(ac_state, end_arc) and
+                    dist[state] + tail_cost < best):
                     best, best_state, best_end_arc = dist[state] + tail_cost, state, end_arc
 
             for k in self.adj[self.adj_start[node]:self.adj_start[node + 1]]:
@@ -209,19 +227,23 @@ class Graph:
                     out_arc, nxt = 2 * int(k) + 1, int(self.A[k])
                 else:
                     continue
-                if (state, out_arc) in self.turns or out_arc in done:
+                if (in_arc, out_arc) in self.turns or self._ac_blocked(ac_state, out_arc):
+                    continue
+                ac_next = self._ac_next(ac_state, out_arc)
+                next_state = (out_arc, ac_next)
+                if next_state in done:
                     continue
                 candidate = dist[state] + self.cost(int(k), self.LEN[k] / 10.0)
-                if candidate < dist.get(out_arc, INF):
-                    dist[out_arc] = candidate
-                    prev[out_arc] = state
-                    heapq.heappush(heap, (candidate + heuristic(nxt), out_arc))
+                if candidate < dist.get(next_state, INF):
+                    dist[next_state] = candidate
+                    prev[next_state] = state
+                    heapq.heappush(heap, (candidate + heuristic(nxt), next_state))
 
         if best_state is None:
             return None
         arcs, state = [], best_state
         while state is not None:
-            arcs.append(state)
+            arcs.append(state[0])
             state = prev[state]
         arcs.reverse()
         legs = [(arc // 2, arc % 2 == 0) for arc in arcs]
