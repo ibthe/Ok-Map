@@ -21,7 +21,7 @@ import sys
 import numpy as np
 
 MAGIC = 0x3247_4B4F  # "OKG2"
-VERSION = 3
+VERSION = 4
 
 # class id (stored in flags bits 2..5), default speed km/h
 CLASSES = {
@@ -173,14 +173,16 @@ def way_name(tags):
     return n or ref
 
 
-def build(ways, min_component=40, cell=5000, restrictions=(), via_way_restrictions=()):
+def build(ways, min_component=40, cell=5000, restrictions=(), via_way_restrictions=(), conditional_restrictions=()):
     """Build graph; ways may be (tags,nodes) or (tags,nodes,osm_way_id).
 
     restrictions contains (from_way_id, via_node_id, to_way_id, restriction_tag) via-node relations.
     """
     restrictions = list(restrictions)
     via_way_restrictions = list(via_way_restrictions)
-    restriction_via_nodes = {int(r[1]) for r in restrictions}
+    conditional_restrictions = list(conditional_restrictions)
+    restriction_via_nodes = ({int(r[1]) for r in restrictions} |
+                             {int(r[1]) for r in conditional_restrictions})
     use = {}
     kept = []
     for item in ways:
@@ -306,6 +308,41 @@ def build(ways, min_component=40, cell=5000, restrictions=(), via_way_restrictio
             for ia in incoming:
                 blocked.update((ia, oa) for oa in allowed)
     turn_restrictions = np.asarray(sorted(blocked), dtype="<i4").reshape((-1, 2)) if blocked else np.empty((0, 2), dtype="<i4")
+
+    # Conditional via-node restrictions are stored separately and activated by the
+    # Android router only during their supported weekday/time window.
+    conditional_blocked = set()
+    for from_way, via_node, to_way, kind, day_mask, start_minute, end_minute in conditional_restrictions:
+        incoming = by_way_node_in.get((int(from_way), int(via_node)), ())
+        if not incoming:
+            continue
+        if int(from_way) == int(to_way) and kind == "no_u_turn":
+            pairs = ((ia, ia ^ 1) for ia in incoming)
+            conditional_blocked.update((ia, oa, int(day_mask), int(start_minute), int(end_minute)) for ia, oa in pairs)
+            continue
+        if int(from_way) == int(to_way) and kind == "only_u_turn":
+            allowed = {ia ^ 1 for ia in incoming}
+        else:
+            allowed = set(by_way_node_out.get((int(to_way), int(via_node)), ()))
+        if not allowed:
+            continue
+        if str(kind).startswith("only_"):
+            outs = outgoing_at.get(int(via_node), ())
+            for ia in incoming:
+                conditional_blocked.update(
+                    (ia, oa, int(day_mask), int(start_minute), int(end_minute))
+                    for oa in outs if oa not in allowed
+                )
+        elif str(kind).startswith("no_"):
+            for ia in incoming:
+                conditional_blocked.update(
+                    (ia, oa, int(day_mask), int(start_minute), int(end_minute))
+                    for oa in allowed
+                )
+    conditional_turn_restrictions = (
+        np.asarray(sorted(conditional_blocked), dtype="<i4").reshape((-1, 5))
+        if conditional_blocked else np.empty((0, 5), dtype="<i4")
+    )
 
     # Resolve ordered via-way relations to exact directed-arc sequences. Ambiguous
     # topology is ignored rather than producing a restriction broader than OSM intended.
@@ -447,7 +484,8 @@ def build(ways, min_component=40, cell=5000, restrictions=(), via_way_restrictio
                 KMH=KMH, FLG=FLG, SCNT=SCNT, shp_lat=shp_lat_a, shp_lon=shp_lon_a, name_off=name_off,
                 name_bytes=b"".join(name_bytes), names=len(names), lat0=lat0, lon0=lon0, cell=cell, W=W, H=H,
                 cell_start=cell_start, cell_data=cell_data, turn_restrictions=turn_restrictions,
-                sequence_restrictions=sequence_restrictions)
+                sequence_restrictions=sequence_restrictions,
+                conditional_turn_restrictions=conditional_turn_restrictions)
 
 
 def pad4(b):
@@ -479,7 +517,81 @@ def write(g, path):
         for rtype, prefix, allowed in seqs:
             f.write(struct.pack("<iii", int(rtype), len(prefix), len(allowed)))
             f.write(struct.pack("<" + "i" * (len(prefix) + len(allowed)), *(prefix + allowed)))
+        conditional = g.get("conditional_turn_restrictions", np.empty((0, 5), dtype="<i4"))
+        f.write(struct.pack("<i", len(conditional)))
+        if len(conditional):
+            f.write(conditional.astype("<i4", copy=False).tobytes())
     print(f"graph: {N} nodes, {S} segments, {P} shape points, {g['names']} names, grid {g['W']}x{g['H']}")
+
+
+DAY_INDEX = {"Mo": 0, "Tu": 1, "We": 2, "Th": 3, "Fr": 4, "Sa": 5, "Su": 6}
+
+
+def parse_conditional_restrictions(value):
+    """Parse the safe supported subset: weekday lists/ranges and same-day HH:MM ranges."""
+    out = []
+    for clause in str(value or "").split(";"):
+        match = re.fullmatch(r"\s*([a-z_]+)\s*@\s*\(([^)]+)\)\s*", clause)
+        if not match:
+            continue
+        kind, condition = match.group(1), match.group(2).strip()
+        if kind not in NO_TURN_RESTRICTIONS | ONLY_TURN_RESTRICTIONS | MULTI_MEMBER_TURN_RESTRICTIONS:
+            continue
+
+        parts = condition.split()
+        day_expr, time_expr = None, None
+        if len(parts) == 1:
+            if ":" in parts[0]:
+                time_expr = parts[0]
+            else:
+                day_expr = parts[0]
+        elif len(parts) == 2:
+            day_expr, time_expr = parts
+        else:
+            continue
+
+        day_mask = 0
+        if day_expr is None:
+            day_mask = 0x7f
+        else:
+            valid_days = True
+            for item in day_expr.split(","):
+                endpoints = item.split("-")
+                if len(endpoints) == 1 and endpoints[0] in DAY_INDEX:
+                    day_mask |= 1 << DAY_INDEX[endpoints[0]]
+                elif len(endpoints) == 2 and all(x in DAY_INDEX for x in endpoints):
+                    day = DAY_INDEX[endpoints[0]]
+                    end = DAY_INDEX[endpoints[1]]
+                    while True:
+                        day_mask |= 1 << day
+                        if day == end:
+                            break
+                        day = (day + 1) % 7
+                else:
+                    valid_days = False
+                    break
+            if not valid_days or not day_mask:
+                continue
+
+        start_minute, end_minute = 0, 1440
+        if time_expr is not None:
+            times = time_expr.split("-")
+            if len(times) != 2:
+                continue
+            def minute(text, allow_24=False):
+                m = re.fullmatch(r"(\d{2}):(\d{2})", text)
+                if not m:
+                    return None
+                hour, minute = int(m.group(1)), int(m.group(2))
+                if minute > 59 or hour > (24 if allow_24 else 23) or (hour == 24 and (minute != 0 or not allow_24)):
+                    return None
+                return hour * 60 + minute
+            start_minute = minute(times[0])
+            end_minute = minute(times[1], allow_24=True)
+            if start_minute is None or end_minute is None or start_minute >= end_minute:
+                continue
+        out.append((kind, day_mask, start_minute, end_minute))
+    return out
 
 
 def read_pbf(path):
@@ -491,6 +603,7 @@ def read_pbf(path):
             self.ways = []
             self.restrictions = []
             self.via_way_restrictions = []
+            self.conditional_restrictions = []
 
         def way(self, w):
             if "highway" not in w.tags:
@@ -508,11 +621,24 @@ def read_pbf(path):
 
         def relation(self, r):
             tags = {t.k: t.v for t in r.tags}
+            conditional_value = (tags.get("restriction:motorcar:conditional") or
+                                 tags.get("restriction:motor_vehicle:conditional") or
+                                 tags.get("restriction:conditional"))
             kind = car_restriction_kind(tags)
-            if kind is None:
+            # Mixed static + conditional relations keep their static restriction; we do not
+            # reinterpret the default rule as time-limited.
+            conditional_rules = parse_conditional_restrictions(conditional_value) if kind is None else []
+            if kind is None and not conditional_rules:
                 return
             # Keep unsupported member types so malformed relations are rejected, not shortened.
             ordered = [(m.role, m.type, int(m.ref)) for m in r.members]
+            if conditional_rules:
+                for conditional_kind, day_mask, start_minute, end_minute in conditional_rules:
+                    parsed_nodes = parse_via_node_member_pairs(ordered, conditional_kind)
+                    self.conditional_restrictions.extend(
+                        (*pair, conditional_kind, day_mask, start_minute, end_minute) for pair in parsed_nodes
+                    )
+                return
             parsed_via = parse_via_way_members(ordered)
             if parsed_via is not None:
                 self.via_way_restrictions.append((*parsed_via, kind))
@@ -524,14 +650,16 @@ def read_pbf(path):
     h = H()
     h.apply_file(path, locations=True)
     print("routable ways:", len(h.ways), "via-node restrictions:", len(h.restrictions),
-          "via-way restrictions detected:", len(h.via_way_restrictions))
-    return h.ways, h.restrictions, h.via_way_restrictions
+          "via-way restrictions detected:", len(h.via_way_restrictions),
+          "conditional via-node restrictions:", len(h.conditional_restrictions))
+    return h.ways, h.restrictions, h.via_way_restrictions, h.conditional_restrictions
 
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         sys.exit(__doc__)
-    ways, restrictions, via_way_restrictions = read_pbf(sys.argv[1])
-    graph = build(ways, restrictions=restrictions, via_way_restrictions=via_way_restrictions)
+    ways, restrictions, via_way_restrictions, conditional_restrictions = read_pbf(sys.argv[1])
+    graph = build(ways, restrictions=restrictions, via_way_restrictions=via_way_restrictions,
+                  conditional_restrictions=conditional_restrictions)
     print("via-way sequence restriction records:", len(graph["sequence_restrictions"]))
     write(graph, sys.argv[2])
