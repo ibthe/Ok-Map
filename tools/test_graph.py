@@ -156,6 +156,9 @@ assert bg.parse_via_way_members([
     ("from", "w", 100), ("via", "n", 250), ("via", "w", 300), ("to", "w", 400)
 ]) is None
 assert bg.parse_via_way_members([
+    ("from", "w", 100), ("via", "r", 250), ("to", "w", 400)
+]) is None
+assert bg.parse_via_way_members([
     ("from", "w", 100), ("via", "w", 200), ("to", "w", 400), ("to", "w", 401)
 ]) is None
 assert bg.parse_via_way_members([
