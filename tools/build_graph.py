@@ -427,7 +427,12 @@ def write(g, path):
         f.write(g["cell_data"].tobytes())
         turns = g.get("turn_restrictions", np.empty((0, 2), dtype="<i4"))
         f.write(struct.pack("<i", len(turns)))
-        f.write(turns.astype("<i4", copy=False).tobytes())\n        seqs = g.get("sequence_restrictions", [])\n        f.write(struct.pack("<i", len(seqs)))\n        for rtype, prefix, allowed in seqs:\n            f.write(struct.pack("<iii", int(rtype), len(prefix), len(allowed)))\n            f.write(struct.pack("<" + "i" * (len(prefix) + len(allowed)), *(prefix + allowed)))
+        f.write(turns.astype("<i4", copy=False).tobytes())
+        seqs = g.get("sequence_restrictions", [])
+        f.write(struct.pack("<i", len(seqs)))
+        for rtype, prefix, allowed in seqs:
+            f.write(struct.pack("<iii", int(rtype), len(prefix), len(allowed)))
+            f.write(struct.pack("<" + "i" * (len(prefix) + len(allowed)), *(prefix + allowed)))
     print(f"graph: {N} nodes, {S} segments, {P} shape points, {g['names']} names, grid {g['W']}x{g['H']}")
 
 
