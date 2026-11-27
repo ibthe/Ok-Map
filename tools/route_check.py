@@ -43,10 +43,11 @@ class Graph:
         self.name_bytes = raw[pos[0]:pos[0] + self.NB]
         pos[0] += self.NB + (-self.NB) % 4
         self.cell_start, self.cell_data = take("<i4", self.W * self.H + 1), take("<i4", self.CD)
-        if self.version not in (1, 2, 3):
+        if self.version not in (1, 2, 3, 4):
             raise ValueError(f"unsupported graph format version {self.version}")
         self.turns = set()
-        if self.version in (2, 3):
+        self.conditional_turns = []
+        if self.version in (2, 3, 4):
             if pos[0] + 4 > len(raw):
                 raise ValueError("missing turn-restriction section")
             count = struct.unpack_from("<i", raw, pos[0])[0]
@@ -59,7 +60,7 @@ class Graph:
             self.turns = {(int(a), int(b)) for a, b in pairs}
             pos[0] += count * 8
         self.ac_edges, self.ac_fail, self.ac_bad, self.ac_only = [{}], [0], [False], [None]
-        if self.version == 3:
+        if self.version in (3, 4):
             if pos[0] + 4 > len(raw):
                 raise ValueError("missing sequence-restriction section")
             nseq, = struct.unpack_from("<i", raw, pos[0]); pos[0] += 4
@@ -101,9 +102,22 @@ class Graph:
                     f = self.ac_fail[state]
                     while f and arc not in self.ac_edges[f]: f = self.ac_fail[f]
                     self.ac_fail[child] = self.ac_edges[f].get(arc, 0)
-            if pos[0] != len(raw): raise ValueError("unexpected trailing sequence-restriction data")
+            if self.version == 4:
+                if pos[0] + 4 > len(raw): raise ValueError("missing conditional-turn section")
+                count, = struct.unpack_from("<i", raw, pos[0]); pos[0] += 4
+                if count < 0 or pos[0] + count * 20 > len(raw):
+                    raise ValueError("invalid conditional-turn section size")
+                for _ in range(count):
+                    incoming, outgoing, days, start_minute, end_minute = struct.unpack_from("<iiiii", raw, pos[0])
+                    pos[0] += 20
+                    if (incoming < 0 or incoming >= self.S * 2 or outgoing < 0 or outgoing >= self.S * 2 or
+                            days < 1 or days > 0x7f or start_minute < 0 or start_minute > 1439 or
+                            end_minute < 1 or end_minute > 1440 or start_minute >= end_minute):
+                        raise ValueError("invalid conditional-turn record")
+                    self.conditional_turns.append((incoming, outgoing, days, start_minute, end_minute))
+            if pos[0] != len(raw): raise ValueError("unexpected trailing graph restriction data")
         elif pos[0] != len(raw):
-            raise ValueError("unexpected trailing data in graph format v1")
+            raise ValueError("unexpected trailing data in graph format v1/v2")
 
     def shape(self, k):
         s, c = self.SST[k], self.SCNT[k]
@@ -181,8 +195,20 @@ class Graph:
             return True
         return self.ac_bad[self._ac_next(state, arc)]
 
-    def route(self, s, e, avoid_unpaved=True):
+    def route(self, s, e, avoid_unpaved=True, now=None):
         """A*: state is (incoming directed arc, via-way restriction automaton state)."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        now = now or datetime.now(ZoneInfo("Asia/Tbilisi"))
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=ZoneInfo("Asia/Tbilisi"))
+        day_bit = 1 << now.weekday()
+        minute = now.hour * 60 + now.minute
+        active_turns = {
+            (incoming, outgoing)
+            for incoming, outgoing, days, start, end in self.conditional_turns
+            if (days & day_bit) and start <= minute < end
+        }
         _, ks, os_ = s
         _, ke, oe = e
         Lk, Le = self.LEN[ks] / 10.0, self.LEN[ke] / 10.0
@@ -266,7 +292,7 @@ class Graph:
             if node == int(self.B[ke]) and self.FLG[ke] & 2:
                 end_options.append((2 * ke + 1, self.cost(ke, Le - oe, avoid_unpaved)))
             for end_arc, tail_cost in end_options:
-                if ((in_arc, end_arc) not in self.turns and
+                if ((in_arc, end_arc) not in self.turns and (in_arc, end_arc) not in active_turns and
                     not self._ac_blocked(ac_state, end_arc) and
                     dist[state] + tail_cost < best):
                     best, best_state, best_end_arc = dist[state] + tail_cost, state, end_arc
@@ -278,7 +304,7 @@ class Graph:
                     out_arc, nxt = 2 * int(k) + 1, int(self.A[k])
                 else:
                     continue
-                if (in_arc, out_arc) in self.turns or self._ac_blocked(ac_state, out_arc):
+                if (in_arc, out_arc) in self.turns or (in_arc, out_arc) in active_turns or self._ac_blocked(ac_state, out_arc):
                     continue
                 ac_next = self._ac_next(ac_state, out_arc)
                 next_state = (out_arc, ac_next)
