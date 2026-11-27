@@ -13,12 +13,14 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 
-/** Foreground service that records a GPS track into the database while the screen is off. */
+/** Foreground service that records a location track into the database while the screen is off. */
 class TrackService : Service() {
 
     companion object {
@@ -30,11 +32,26 @@ class TrackService : Service() {
     private var db: UserDb? = null
     private var lm: LocationManager? = null
     private var trackId = 0L
+    private var writerThread: HandlerThread? = null
+    private var writer: Handler? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        val thread = HandlerThread("ok-map-track-db")
+        thread.start()
+        writerThread = thread
+        writer = Handler(thread.looper)
+    }
 
     private val listener = object : LocationListener {
         override fun onLocationChanged(l: Location) {
-            if (trackId > 0) {
-                db?.addPoint(trackId, l.latitude, l.longitude, if (l.hasAltitude()) l.altitude else Double.NaN, l.time)
+            val id = trackId
+            if (id <= 0L) return
+            val point = UserDb.Pt(l.latitude, l.longitude, if (l.hasAltitude()) l.altitude else Double.NaN, l.time)
+            // Location callbacks arrive on the main looper. Queue SQLite writes so slow storage
+            // cannot freeze map gestures, navigation guidance, or the recording UI.
+            writer?.post {
+                try { db?.addPoint(id, point.lat, point.lon, point.ele, point.ts) } catch (_: Exception) {}
             }
         }
 
@@ -59,7 +76,7 @@ class TrackService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val n: Notification = NotificationCompat.Builder(this, CHANNEL)
-            .setContentTitle("Запись GPS-трека")
+            .setContentTitle("Запись трека")
             .setContentText("Ok Map записывает маршрут")
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
@@ -79,10 +96,26 @@ class TrackService : Service() {
 
         val manager = getSystemService(LOCATION_SERVICE) as LocationManager
         lm = manager
+        val fine = checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val coarse = checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val gps = fine && runCatching { manager.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)
+        val net = (fine || coarse) && runCatching { manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(false)
+        // Record from one provider only; mixing GPS and network fixes creates doubled, jagged tracks.
+        val provider = when {
+            gps -> LocationManager.GPS_PROVIDER
+            net -> LocationManager.NETWORK_PROVIDER
+            else -> null
+        }
+        if (provider == null) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        try { manager.removeUpdates(listener) } catch (_: Exception) {}
+        running = false
         try {
-            manager.removeUpdates(listener)
-            manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 3000L, 5f, listener, Looper.getMainLooper())
-        } catch (e: SecurityException) {
+            manager.requestLocationUpdates(provider, 3000L, 5f, listener, Looper.getMainLooper())
+        } catch (_: Exception) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -91,8 +124,24 @@ class TrackService : Service() {
     }
 
     override fun onDestroy() {
-        lm?.removeUpdates(listener)
+        try { lm?.removeUpdates(listener) } catch (_: Exception) {}
         running = false
+        val handler = writer
+        val thread = writerThread
+        if (handler != null && thread != null) {
+            // This is queued after all accepted location writes, so the DB is closed only
+            // after the recording queue has drained.
+            handler.post {
+                try { db?.close() } catch (_: Exception) {}
+                db = null
+                thread.quitSafely()
+            }
+        } else {
+            try { db?.close() } catch (_: Exception) {}
+            db = null
+        }
+        writer = null
+        writerThread = null
         super.onDestroy()
     }
 }

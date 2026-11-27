@@ -10,7 +10,8 @@ import sys
 import numpy as np
 
 PEN = {10: 2.5}          # class id -> time multiplier (tracks are a last resort)
-UNPAVED_PEN = 1.3
+UNPAVED_AVOID_PEN = 3.0
+UNPAVED_NORMAL_PEN = 1.3
 
 
 def hav(la1, lo1, la2, lo2):
@@ -23,7 +24,7 @@ class Graph:
     def __init__(self, path):
         raw = open(path, "rb").read()
         h = struct.unpack_from("<20i", raw, 0)
-        (_, _, self.N, self.S, self.P, self.Aj, self.M, self.NB, self.maxkmh,
+        (_, self.version, self.N, self.S, self.P, self.Aj, self.M, self.NB, self.maxkmh,
          self.lat0, self.lon0, self.cell, self.W, self.H, self.CD) = h[:15]
         pos = [80]
 
@@ -42,7 +43,81 @@ class Graph:
         self.name_bytes = raw[pos[0]:pos[0] + self.NB]
         pos[0] += self.NB + (-self.NB) % 4
         self.cell_start, self.cell_data = take("<i4", self.W * self.H + 1), take("<i4", self.CD)
-        assert pos[0] + self.CD * 4 - self.CD * 4 <= len(raw)
+        if self.version not in (1, 2, 3, 4):
+            raise ValueError(f"unsupported graph format version {self.version}")
+        self.turns = set()
+        self.conditional_turns = []
+        if self.version in (2, 3, 4):
+            if pos[0] + 4 > len(raw):
+                raise ValueError("missing turn-restriction section")
+            count = struct.unpack_from("<i", raw, pos[0])[0]
+            pos[0] += 4
+            if count < 0 or pos[0] + count * 8 > len(raw):
+                raise ValueError("invalid turn-restriction section size")
+            pairs = np.frombuffer(raw, dtype="<i4", count=count * 2, offset=pos[0]).reshape((-1, 2))
+            if pairs.size and (np.any(pairs < 0) or np.any(pairs >= self.S * 2)):
+                raise ValueError("turn-restriction arc id out of range")
+            self.turns = {(int(a), int(b)) for a, b in pairs}
+            pos[0] += count * 8
+        self.ac_edges, self.ac_fail, self.ac_bad, self.ac_only = [{}], [0], [False], [None]
+        if self.version in (3, 4):
+            if pos[0] + 4 > len(raw):
+                raise ValueError("missing sequence-restriction section")
+            nseq, = struct.unpack_from("<i", raw, pos[0]); pos[0] += 4
+            if nseq < 0: raise ValueError("invalid sequence-restriction count")
+            self.ac_edges, self.ac_fail, self.ac_bad, self.ac_only = [{}], [0], [False], [None]
+            local_only = [[]]
+            for _ in range(nseq):
+                if pos[0] + 12 > len(raw): raise ValueError("truncated sequence restriction")
+                typ, plen, alen = struct.unpack_from("<iii", raw, pos[0]); pos[0] += 12
+                if typ not in (1, 2) or plen < 1 or alen < 0 or (typ == 1 and alen != 0) or (typ == 2 and alen < 1):
+                    raise ValueError("invalid sequence restriction header")
+                n = plen + alen
+                if pos[0] + 4 * n > len(raw): raise ValueError("truncated sequence restriction arcs")
+                arcs = list(struct.unpack_from("<" + "i" * n, raw, pos[0])); pos[0] += 4 * n
+                if any(a < 0 or a >= self.S * 2 for a in arcs): raise ValueError("sequence restriction arc out of range")
+                state = 0
+                for arc in arcs[:plen]:
+                    nxt = self.ac_edges[state].get(arc)
+                    if nxt is None:
+                        nxt = len(self.ac_edges); self.ac_edges[state][arc] = nxt
+                        self.ac_edges.append({}); self.ac_fail.append(0); self.ac_bad.append(False); self.ac_only.append(None); local_only.append([])
+                    state = nxt
+                if typ == 1: self.ac_bad[state] = True
+                else: local_only[state].append(frozenset(arcs[plen:]))
+            from collections import deque
+            q = deque(self.ac_edges[0].values())
+            while q:
+                state = q.popleft()
+                f = self.ac_fail[state]
+                self.ac_bad[state] = self.ac_bad[state] or self.ac_bad[f]
+                inherited, sets = self.ac_only[f], local_only[state]
+                if inherited is not None or sets:
+                    allowed = set(inherited) if inherited is not None else None
+                    for item in sets:
+                        allowed = set(item) if allowed is None else allowed.intersection(item)
+                    self.ac_only[state] = frozenset(allowed)
+                for arc, child in self.ac_edges[state].items():
+                    q.append(child)
+                    f = self.ac_fail[state]
+                    while f and arc not in self.ac_edges[f]: f = self.ac_fail[f]
+                    self.ac_fail[child] = self.ac_edges[f].get(arc, 0)
+            if self.version == 4:
+                if pos[0] + 4 > len(raw): raise ValueError("missing conditional-turn section")
+                count, = struct.unpack_from("<i", raw, pos[0]); pos[0] += 4
+                if count < 0 or pos[0] + count * 20 > len(raw):
+                    raise ValueError("invalid conditional-turn section size")
+                for _ in range(count):
+                    incoming, outgoing, days, start_minute, end_minute = struct.unpack_from("<iiiii", raw, pos[0])
+                    pos[0] += 20
+                    if (incoming < 0 or incoming >= self.S * 2 or outgoing < 0 or outgoing >= self.S * 2 or
+                            days < 1 or days > 0x7f or start_minute < 0 or start_minute > 1439 or
+                            end_minute < 1 or end_minute > 1440 or start_minute >= end_minute):
+                        raise ValueError("invalid conditional-turn record")
+                    self.conditional_turns.append((incoming, outgoing, days, start_minute, end_minute))
+            if pos[0] != len(raw): raise ValueError("unexpected trailing graph restriction data")
+        elif pos[0] != len(raw):
+            raise ValueError("unexpected trailing data in graph format v1/v2")
 
     def shape(self, k):
         s, c = self.SST[k], self.SCNT[k]
@@ -51,10 +126,31 @@ class Graph:
         pts.append((self.nlat[self.B[k]] / 1e6, self.nlon[self.B[k]] / 1e6))
         return pts
 
-    def snap(self, lat, lon, max_cells=12):
-        cy, cx = (int(lat * 1e6) - self.lat0) // self.cell, (int(lon * 1e6) - self.lon0) // self.cell
-        best = None
+    def _snap_to_segment(self, kseg, lat, lon, k):
+        pts, off = self.shape(kseg), 0.0
+        best_planar, best_off = float("inf"), 0.0
+        best_lat = best_lon = 0.0
+        for p, q in zip(pts, pts[1:]):
+            ax, ay = (p[1] - lon) * k, p[0] - lat
+            dx, dy = (q[1] - p[1]) * k, q[0] - p[0]
+            l2 = dx * dx + dy * dy
+            t = 0.0 if l2 == 0 else max(0.0, min(1.0, -(ax * dx + ay * dy) / l2))
+            planar = math.hypot(ax + t * dx, ay + t * dy) * 111320.0
+            seg_len = hav(p[0], p[1], q[0], q[1])
+            if planar < best_planar:
+                best_planar = planar
+                best_off = off + t * seg_len
+                best_lat = p[0] + (q[0] - p[0]) * t
+                best_lon = p[1] + (q[1] - p[1]) * t
+            off += seg_len
+        return hav(lat, lon, best_lat, best_lon), int(kseg), best_off
+
+    def snap(self, lat, lon, max_cells=40):
+        cy = math.trunc((math.floor(lat * 1e6) - self.lat0) / self.cell)
+        cx = math.trunc((math.floor(lon * 1e6) - self.lon0) / self.cell)
         k = math.cos(math.radians(lat))
+        cell_meters = self.cell * 1e-6 * 111320.0 * min(1.0, k)
+        best = None
         for r in range(max_cells):
             for y in range(cy - r, cy + r + 1):
                 for x in range(cx - r, cx + r + 1):
@@ -62,111 +158,174 @@ class Graph:
                         continue
                     c = y * self.W + x
                     for kseg in self.cell_data[self.cell_start[c]:self.cell_start[c + 1]]:
-                        pts, off = self.shape(kseg), 0.0
-                        for p, q in zip(pts, pts[1:]):
-                            ax, ay, bx, by = (p[1] - lon) * k, p[0] - lat, (q[1] - lon) * k, q[0] - lat
-                            dx, dy = bx - ax, by - ay
-                            L2 = dx * dx + dy * dy
-                            t = 0 if L2 == 0 else max(0.0, min(1.0, -(ax * dx + ay * dy) / L2))
-                            d = math.hypot(ax + t * dx, ay + t * dy) * 111320
-                            seg_len = hav(p[0], p[1], q[0], q[1])
-                            if best is None or d < best[0]:
-                                best = (d, int(kseg), off + t * seg_len)
-                            off += seg_len
-            if best is not None and best[0] < r * self.cell * 1e-6 * 111320 * 0.9:
+                        candidate = self._snap_to_segment(int(kseg), lat, lon, k)
+                        if best is None or candidate[0] < best[0]:
+                            best = candidate
+            if best is not None and best[0] <= r * cell_meters:
                 break
+        if best is not None:
+            return best
+
+        # Match Graph.kt: if the local grid has no road, use the nearest junction in the network.
+        if self.N == 0:
+            return None
+        bn = min(range(self.N), key=lambda i:
+                 (self.nlat[i] / 1e6 - lat) ** 2 +
+                 ((self.nlon[i] / 1e6 - lon) * k) ** 2)
+        for i in range(int(self.adj_start[bn]), int(self.adj_start[bn + 1])):
+            candidate = self._snap_to_segment(int(self.adj[i]), lat, lon, k)
+            if best is None or candidate[0] < best[0]:
+                best = candidate
         return best
 
-    def cost(self, k, meters):
-        mult = PEN.get((self.FLG[k] >> 2) & 15, 1.0) * (UNPAVED_PEN if self.FLG[k] & 128 else 1.0)
+    def cost(self, k, meters, avoid_unpaved=True):
+        mult = PEN.get((self.FLG[k] >> 2) & 15, 1.0)
+        if self.FLG[k] & 128:
+            mult *= UNPAVED_AVOID_PEN if avoid_unpaved else UNPAVED_NORMAL_PEN
         return meters / (self.KMH[k] / 3.6) * mult
 
-    def route(self, s, e):
-        """s, e = snap results (d, seg, offset_m). Returns (time_s, [(seg, forward)]) or None"""
+    def _ac_next(self, state, arc):
+        while state and arc not in self.ac_edges[state]:
+            state = self.ac_fail[state]
+        return self.ac_edges[state].get(arc, 0)
+
+    def _ac_blocked(self, state, arc):
+        allowed = self.ac_only[state]
+        if allowed is not None and arc not in allowed:
+            return True
+        return self.ac_bad[self._ac_next(state, arc)]
+
+    def route(self, s, e, avoid_unpaved=True, now=None):
+        """A*: state is (incoming directed arc, via-way restriction automaton state)."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        now = now or datetime.now(ZoneInfo("Asia/Tbilisi"))
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=ZoneInfo("Asia/Tbilisi"))
+        day_bit = 1 << now.weekday()
+        minute = now.hour * 60 + now.minute
+        active_turns = {
+            (incoming, outgoing)
+            for incoming, outgoing, days, start, end in self.conditional_turns
+            if (days & day_bit) and start <= minute < end
+        }
         _, ks, os_ = s
         _, ke, oe = e
-        el, eo = self.nlat, self.nlon
-        tgt = (self.nlat[self.A[ke]], self.nlon[self.A[ke]])
-        elat, elon = None, None
-        pts = self.shape(ke)
-        # end point coordinates for the heuristic
-        acc, cur = 0.0, pts[0]
-        for p, q in zip(pts, pts[1:]):
-            L = hav(p[0], p[1], q[0], q[1])
-            if acc + L >= oe or q is pts[-1]:
-                t = 0 if L == 0 else max(0.0, min(1.0, (oe - acc) / L))
-                elat, elon = p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t
-                break
-            acc += L
-        vmax = self.maxkmh / 3.6
+        Lk, Le = self.LEN[ks] / 10.0, self.LEN[ke] / 10.0
         INF = float("inf")
-        g = {}
-        prev = {}
-        heap = []
-        Lk = self.LEN[ks] / 10.0
-        fl = self.FLG[ks]
-        starts = []
-        if fl & 2:
-            starts.append((self.A[ks], self.cost(ks, os_), (ks, False, os_, 0.0)))
-        if fl & 1:
-            starts.append((self.B[ks], self.cost(ks, Lk - os_), (ks, True, os_, Lk)))
-        best, best_end = INF, None
-        if ks == ke:
-            if oe >= os_ and fl & 1:
-                best, best_end = self.cost(ks, oe - os_), ("direct",)
-            elif oe < os_ and fl & 2:
-                best, best_end = self.cost(ks, os_ - oe), ("direct",)
+        def arc_end(arc):
+            k = arc // 2
+            return int(self.B[k] if arc % 2 == 0 else self.A[k])
 
-        def h(n):
-            return hav(self.nlat[n] / 1e6, self.nlon[n] / 1e6, elat, elon) / vmax
-        for n, c, via in starts:
-            g[int(n)] = c
-            prev[int(n)] = (None, via)
-            heapq.heappush(heap, (c + h(n), int(n)))
-        Le = self.LEN[ke] / 10.0
-        fe = self.FLG[ke]
-        ends = {}
-        if fe & 1:
-            ends[int(self.A[ke])] = self.cost(ke, oe)
-        if fe & 2:
-            ends[int(self.B[ke])] = self.cost(ke, Le - oe)
+        pts = self.shape(ke)
+        acc, elat, elon = 0.0, pts[0][0], pts[0][1]
+        for p, q in zip(pts, pts[1:]):
+            seg_len = hav(p[0], p[1], q[0], q[1])
+            if acc + seg_len >= oe or q == pts[-1]:
+                t = 0.0 if seg_len == 0 else max(0.0, min(1.0, (oe - acc) / seg_len))
+                elat = p[0] + (q[0] - p[0]) * t
+                elon = p[1] + (q[1] - p[1]) * t
+                break
+            acc += seg_len
+        vmax = max(5, self.maxkmh) / 3.6
+
+        def heuristic(node):
+            return hav(self.nlat[node] / 1e6, self.nlon[node] / 1e6, elat, elon) / vmax
+
+        dist, prev, heap = {}, {}, []
+        starts = []
+        start_at_node = os_ <= 1.0 or Lk - os_ <= 1.0
+        if start_at_node:
+            start_node = int(self.A[ks] if os_ <= 1.0 else self.B[ks])
+            for k in self.adj[self.adj_start[start_node]:self.adj_start[start_node + 1]]:
+                if self.A[k] == start_node and self.FLG[k] & 1:
+                    starts.append((2 * int(k), self.cost(int(k), self.LEN[k] / 10.0, avoid_unpaved)))
+                elif self.B[k] == start_node and self.FLG[k] & 2:
+                    starts.append((2 * int(k) + 1, self.cost(int(k), self.LEN[k] / 10.0, avoid_unpaved)))
+        else:
+            if self.FLG[ks] & 2:
+                starts.append((2 * ks + 1, self.cost(ks, os_, avoid_unpaved)))
+            if self.FLG[ks] & 1:
+                starts.append((2 * ks, self.cost(ks, Lk - os_, avoid_unpaved)))
+        for arc, cost in starts:
+            ac = self._ac_next(0, arc)
+            if self.ac_bad[ac]:
+                continue
+            state = (arc, ac)
+            if cost < dist.get(state, INF):
+                dist[state] = cost
+                prev[state] = None
+                heapq.heappush(heap, (cost + heuristic(arc_end(arc)), state))
+
+        best, best_state, best_end_arc = INF, None, None
+        direct_start_leg = None
+        # Same-segment travel is a candidate; A* may find a faster paved detour.
+        if ks == ke:
+            if oe >= os_ and self.FLG[ks] & 1:
+                best = self.cost(ks, oe - os_, avoid_unpaved)
+                direct_start_leg = (ks, True)
+            if oe < os_ and self.FLG[ks] & 2:
+                direct = self.cost(ks, os_ - oe, avoid_unpaved)
+                if direct < best:
+                    best, direct_start_leg = direct, (ks, False)
+        if start_at_node and int(self.A[ke]) == start_node and self.FLG[ke] & 1:
+            direct = self.cost(ke, oe, avoid_unpaved)
+            if direct < best:
+                best, direct_start_leg = direct, (ke, True)
+        if start_at_node and int(self.B[ke]) == start_node and self.FLG[ke] & 2:
+            direct = self.cost(ke, Le - oe, avoid_unpaved)
+            if direct < best:
+                best, direct_start_leg = direct, (ke, False)
         done = set()
         while heap:
-            f, u = heapq.heappop(heap)
-            if u in done:
-                continue
-            if f >= best:
+            estimate, state = heapq.heappop(heap)
+            if estimate >= best:
                 break
-            done.add(u)
-            if u in ends and g[u] + ends[u] < best:
-                best, best_end = g[u] + ends[u], u
-            for k in self.adj[self.adj_start[u]:self.adj_start[u + 1]]:
-                fl = self.FLG[k]
-                if self.A[k] == u and fl & 1:
-                    v, fwd = int(self.B[k]), True
-                elif self.B[k] == u and fl & 2:
-                    v, fwd = int(self.A[k]), False
+            if state in done:
+                continue
+            done.add(state)
+            in_arc, ac_state = state
+            node = arc_end(in_arc)
+            end_options = []
+            if node == int(self.A[ke]) and self.FLG[ke] & 1:
+                end_options.append((2 * ke, self.cost(ke, oe, avoid_unpaved)))
+            if node == int(self.B[ke]) and self.FLG[ke] & 2:
+                end_options.append((2 * ke + 1, self.cost(ke, Le - oe, avoid_unpaved)))
+            for end_arc, tail_cost in end_options:
+                if ((in_arc, end_arc) not in self.turns and (in_arc, end_arc) not in active_turns and
+                    not self._ac_blocked(ac_state, end_arc) and
+                    dist[state] + tail_cost < best):
+                    best, best_state, best_end_arc = dist[state] + tail_cost, state, end_arc
+
+            for k in self.adj[self.adj_start[node]:self.adj_start[node + 1]]:
+                if self.A[k] == node and self.FLG[k] & 1:
+                    out_arc, nxt = 2 * int(k), int(self.B[k])
+                elif self.B[k] == node and self.FLG[k] & 2:
+                    out_arc, nxt = 2 * int(k) + 1, int(self.A[k])
                 else:
                     continue
-                c = g[u] + self.cost(k, self.LEN[k] / 10.0)
-                if c < g.get(v, INF):
-                    g[v] = c
-                    prev[v] = (u, (int(k), fwd, 0.0, 0.0))
-                    heapq.heappush(heap, (c + h(v), v))
-        if best_end is None:
-            return None
-        legs = []
-        if best_end == ("direct",):
-            return best, [(ks, oe >= os_)]
-        u = best_end
-        legs.append((ke, u == int(self.A[ke])))
-        while u is not None:
-            p, via = prev[u]
-            legs.append((via[0], via[1]))
-            u = p
-        legs.reverse()
-        return best, legs
+                if (in_arc, out_arc) in self.turns or (in_arc, out_arc) in active_turns or self._ac_blocked(ac_state, out_arc):
+                    continue
+                ac_next = self._ac_next(ac_state, out_arc)
+                next_state = (out_arc, ac_next)
+                if next_state in done:
+                    continue
+                candidate = dist[state] + self.cost(int(k), self.LEN[k] / 10.0, avoid_unpaved)
+                if candidate < dist.get(next_state, INF):
+                    dist[next_state] = candidate
+                    prev[next_state] = state
+                    heapq.heappush(heap, (candidate + heuristic(nxt), next_state))
 
+        if best_state is None:
+            return (best, [direct_start_leg]) if direct_start_leg is not None else None
+        arcs, state = [], best_state
+        while state is not None:
+            arcs.append(state[0])
+            state = prev[state]
+        arcs.reverse()
+        legs = [(arc // 2, arc % 2 == 0) for arc in arcs]
+        legs.append((best_end_arc // 2, best_end_arc % 2 == 0))
+        return best, legs
     def dist(self, legs):
         return sum(self.LEN[k] / 10.0 for k, _ in legs)
 

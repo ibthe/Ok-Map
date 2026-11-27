@@ -13,6 +13,7 @@ PNG tiles are converted to JPEG (quality 82). Size grows about 4x with every zoo
 """
 import io
 import math
+import os
 import sqlite3
 import sys
 import time
@@ -46,16 +47,20 @@ MIN_BYTES = 600          # smaller answers are blank / transparent tiles (outsid
 
 
 def recompress(data, quality=82):
-    """PNG (often 100+ KB at high zoom) -> JPEG, about 5-8x smaller; transparent areas become dark grey"""
-    if data[:4] != b"\x89PNG":
-        return data, "jpg" if data[:2] == b"\xff\xd8" else "png"
+    """Validate a tile image and normalize it to JPEG; return None for invalid payloads."""
     try:
         from PIL import Image
         im = Image.open(io.BytesIO(data))
+        image_format = (im.format or "").upper()
+        if image_format not in ("JPEG", "PNG", "WEBP"):
+            return None
+        im.load()  # forces decoding; HTML/error bodies and truncated images are rejected
+        if image_format == "JPEG":
+            return data, "jpg"
         if im.mode in ("RGBA", "LA", "P"):
             im = im.convert("RGBA")
             bg = Image.new("RGB", im.size, (48, 48, 48))
-            bg.paste(im, mask=im.split()[-1])
+            bg.paste(im, mask=im.getchannel("A"))
             im = bg
         else:
             im = im.convert("RGB")
@@ -63,8 +68,7 @@ def recompress(data, quality=82):
         im.save(out, "JPEG", quality=quality, optimize=True)
         return out.getvalue(), "jpg"
     except Exception:
-        return data, "png"
-
+        return None
 
 def fetch(url):
     for attempt in range(3):
@@ -92,35 +96,52 @@ def main(map_path, out_path, template, max_zoom=12, min_zoom=0, details=()):
     jobs = sorted(set(jobs))
     top = max(j[0] for j in jobs)
     print(f"{len(jobs)} tiles, zoom {min_zoom}-{top}")
-    db = sqlite3.connect(out_path)
-    db.executescript("""drop table if exists tiles; drop table if exists metadata;
-        create table tiles (zoom_level integer, tile_column integer, tile_row integer, tile_data blob);
-        create unique index tile_index on tiles (zoom_level, tile_column, tile_row);
-        create table metadata (name text, value text);""")
-    ok = size = 0
-    fmt = "jpg"
-    with ThreadPoolExecutor(8) as pool:
-        for (z, x, y), data in zip(jobs, pool.map(lambda j: fetch(tile_url(template, *j)), jobs)):
-            if not data or len(data) < MIN_BYTES:
-                continue
-            data, f = recompress(data)
-            if f == "png":
-                fmt = "png"
-            db.execute("insert or replace into tiles values (?,?,?,?)", (z, x, (1 << z) - 1 - y, data))
-            ok += 1
-            size += len(data)
-            if ok % 2000 == 0:
-                db.commit()
-                print(f"  {ok} tiles, {size / 1e6:.0f} MB")
-    for k, v in {"name": "satellite", "format": fmt, "minzoom": str(min_zoom), "maxzoom": str(top),
-                 "bounds": f"{w},{s},{e},{n}", "type": "baselayer"}.items():
-        db.execute("insert into metadata values (?,?)", (k, v))
-    db.commit()
-    db.close()
-    print(f"imagery: {ok}/{len(jobs)} tiles, {size / 1e6:.1f} MB")
-    # a source that covers only the country (and not the whole bounding box) is normal; nothing at all is an error
-    if ok == 0 or ok < len(jobs) * 0.05:
-        sys.exit("almost no tiles could be downloaded - check the URL template")
+    # Build beside the destination and publish only after a complete, validated download.
+    # A failed optional imagery step must never destroy a previously valid MBTiles file.
+    tmp_path = out_path + ".tmp"
+    if os.path.exists(tmp_path):
+        os.remove(tmp_path)
+    db = sqlite3.connect(tmp_path)
+    try:
+        db.executescript("""drop table if exists tiles; drop table if exists metadata;
+            create table tiles (zoom_level integer, tile_column integer, tile_row integer, tile_data blob);
+            create unique index tile_index on tiles (zoom_level, tile_column, tile_row);
+            create table metadata (name text, value text);""")
+        ok = size = 0
+        fmt = "jpg"
+        with ThreadPoolExecutor(8) as pool:
+            for (z, x, y), data in zip(jobs, pool.map(lambda j: fetch(tile_url(template, *j)), jobs)):
+                if not data or len(data) < MIN_BYTES:
+                    continue
+                normalized = recompress(data)
+                if normalized is None:
+                    continue
+                data, f = normalized
+                if f == "png":
+                    fmt = "png"
+                db.execute("insert or replace into tiles values (?,?,?,?)", (z, x, (1 << z) - 1 - y, data))
+                ok += 1
+                size += len(data)
+                if ok % 2000 == 0:
+                    db.commit()
+                    print(f"  {ok} tiles, {size / 1e6:.0f} MB")
+        for k, v in {"name": "satellite", "format": fmt, "minzoom": str(min_zoom), "maxzoom": str(top),
+                     "bounds": f"{w},{s},{e},{n}", "type": "baselayer"}.items():
+            db.execute("insert into metadata values (?,?)", (k, v))
+        db.commit()
+        print(f"imagery: {ok}/{len(jobs)} tiles, {size / 1e6:.1f} MB")
+        # A source covering only part of the map bounds is normal; no/very few tiles is an error.
+        if ok == 0 or ok < len(jobs) * 0.05:
+            raise RuntimeError("almost no valid image tiles could be downloaded - check the URL template")
+        db.close()
+        db = None
+        os.replace(tmp_path, out_path)
+    except BaseException:
+        if db is not None:
+            db.close()
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
 
 
 if __name__ == "__main__":

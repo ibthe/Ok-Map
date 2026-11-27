@@ -9,6 +9,7 @@ Level step per zoom (metres): z9-10: 200, z11: 100, z12: 50 (higher zooms reuse 
 import gzip
 import io
 import math
+import os
 import sqlite3
 import struct
 import sys
@@ -155,21 +156,37 @@ def build(dem, x0, y0, out_path, sigma=1.0):
                     q = q[keep]
                     if len(q) >= 2:
                         tiles.setdefault(key, []).append((lv, idx, [tuple(p) for p in q]))
-    db = sqlite3.connect(out_path)
-    db.executescript("""drop table if exists tiles; drop table if exists metadata;
-        create table tiles (zoom_level integer, tile_column integer, tile_row integer, tile_data blob);
-        create unique index tile_index on tiles (zoom_level, tile_column, tile_row);
-        create table metadata (name text, value text);""")
+    # Build beside the destination and publish only after SQLite integrity validation.
+    # A failed or interrupted contour build must never destroy the previous working dataset.
+    tmp_path = out_path + ".tmp"
+    if os.path.exists(tmp_path):
+        os.remove(tmp_path)
     total = 0
-    for (z, x, y), ln in tiles.items():
-        data = gzip.compress(encode_lines(ln), 6)
-        total += len(data)
-        db.execute("insert into tiles values (?,?,?,?)", (z, x, (1 << z) - 1 - y, data))
-    meta = {"name": "contours", "format": "pbf", "minzoom": "9", "maxzoom": "12", "type": "overlay",
-            "json": '{"vector_layers":[{"id":"contour","fields":{"ele":"Number","idx":"Number"},"minzoom":9,"maxzoom":12}]}'}
-    db.executemany("insert into metadata values (?,?)", meta.items())
-    db.commit()
-    db.close()
+    try:
+        db = sqlite3.connect(tmp_path)
+        try:
+            db.executescript("""create table tiles (zoom_level integer, tile_column integer, tile_row integer, tile_data blob);
+                create unique index tile_index on tiles (zoom_level, tile_column, tile_row);
+                create table metadata (name text, value text);""")
+            for (z, x, y), ln in tiles.items():
+                data = gzip.compress(encode_lines(ln), 6)
+                total += len(data)
+                db.execute("insert into tiles values (?,?,?,?)", (z, x, (1 << z) - 1 - y, data))
+            meta = {"name": "contours", "format": "pbf", "minzoom": "9", "maxzoom": "12", "type": "overlay",
+                    "json": '{"vector_layers":[{"id":"contour","fields":{"ele":"Number","idx":"Number"},"minzoom":9,"maxzoom":12}]}'}
+            db.executemany("insert into metadata values (?,?)", meta.items())
+            db.commit()
+            integrity = db.execute("PRAGMA integrity_check").fetchone()[0]
+            tile_count = db.execute("SELECT count(*) FROM tiles").fetchone()[0]
+            if integrity != "ok" or tile_count == 0:
+                raise RuntimeError(f"invalid contour MBTiles: integrity={integrity}, tiles={tile_count}")
+        finally:
+            db.close()
+        os.replace(tmp_path, out_path)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
     print(f"contours: {len(tiles)} tiles, {total / 1e6:.1f} MB")
 
 

@@ -212,6 +212,7 @@ class Compass(
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, acc: Int) {
+        if (!isOpen) return
         accuracy = acc
         remindIfNeeded()
         refreshUi()
@@ -219,8 +220,9 @@ class Compass(
 
     @Suppress("DEPRECATION")
     override fun onSensorChanged(e: SensorEvent) {
+        if (!isOpen) return
         if (e.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) checkInterference(e.values)
-        if (isOpen) remindIfNeeded()
+        remindIfNeeded()
         val ok: Boolean
         when (e.sensor.type) {
             Sensor.TYPE_ROTATION_VECTOR -> { SensorManager.getRotationMatrixFromVector(rm, e.values); ok = true }

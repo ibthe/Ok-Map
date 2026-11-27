@@ -38,10 +38,26 @@ object Maneuver {
 class Step(val type: Int, val text: String, val street: String, val pointIdx: Int, val exit: Int)
 
 class Route(
-    val lat: DoubleArray, val lon: DoubleArray, val cum: DoubleArray,
+    val lat: DoubleArray, val lon: DoubleArray, val cum: DoubleArray, val timeCum: DoubleArray,
     val steps: List<Step>, val seconds: Double
 ) {
     val distance: Double get() = cum[cum.size - 1]
+
+    /** Remaining travel time at a distance along the route, including road-class/surface penalties. */
+    fun remainingSeconds(along: Double): Double {
+        if (cum.size < 2) return 0.0
+        val d = along.coerceIn(0.0, distance)
+        var lo = 0
+        var hi = cum.lastIndex
+        while (lo + 1 < hi) {
+            val mid = (lo + hi) ushr 1
+            if (cum[mid] <= d) lo = mid else hi = mid
+        }
+        val span = cum[hi] - cum[lo]
+        val f = if (span <= 0.0) 0.0 else (d - cum[lo]) / span
+        val elapsed = timeCum[lo] + (timeCum[hi] - timeCum[lo]) * f
+        return max(0.0, seconds - elapsed)
+    }
 }
 
 /**
@@ -49,6 +65,82 @@ class Route(
  * The file is memory-mapped, so the whole country costs almost no Java heap.
  * Algorithm and file layout are mirrored by tools/route_check.py, which is tested in CI.
  */
+internal data class SequenceRestriction(val type: Int, val prefix: IntArray, val allowed: IntArray)
+private data class ConditionalTurn(val incoming: Int, val outgoing: Int, val days: Int, val startMinute: Int, val endMinute: Int)
+
+/** Aho-Corasick automaton over directed road arcs; supports overlapping via-way restrictions. */
+internal class RestrictionAutomaton(restrictions: List<SequenceRestriction>) {
+    private val edges = ArrayList<HashMap<Int, Int>>()
+    private val fail = ArrayList<Int>()
+    private val forbidden = ArrayList<Boolean>()
+    private val localOnly = ArrayList<MutableList<Set<Int>>>()
+    private val onlyAllowed = ArrayList<Set<Int>?>()
+
+    init {
+        addState()
+        for (r in restrictions) {
+            var state = 0
+            for (arc in r.prefix) {
+                var next = edges[state][arc]
+                if (next == null) {
+                    next = addState()
+                    edges[state][arc] = next
+                }
+                state = next
+            }
+            if (r.type == 1) forbidden[state] = true
+            else localOnly[state].add(r.allowed.toSet())
+        }
+        val queue = java.util.ArrayDeque<Int>()
+        for (child in edges[0].values) queue.add(child)
+        while (queue.isNotEmpty()) {
+            val state = queue.removeFirst()
+            val f = fail[state]
+            forbidden[state] = forbidden[state] || forbidden[f]
+            val inherited = onlyAllowed[f]
+            val local = localOnly[state]
+            if (inherited != null || local.isNotEmpty()) {
+                var allowed: MutableSet<Int>? = inherited?.toMutableSet()
+                for (set in local) {
+                    if (allowed == null) allowed = set.toMutableSet()
+                    else allowed!!.retainAll(set)
+                }
+                onlyAllowed[state] = allowed ?: emptySet()
+            }
+            for ((arc, child) in edges[state]) {
+                queue.add(child)
+                var fallback = fail[state]
+                while (fallback != 0 && !edges[fallback].containsKey(arc)) fallback = fail[fallback]
+                fail[child] = edges[fallback][arc] ?: 0
+            }
+        }
+    }
+
+    private fun addState(): Int {
+        val id = edges.size
+        edges.add(HashMap())
+        fail.add(0)
+        forbidden.add(false)
+        localOnly.add(ArrayList())
+        onlyAllowed.add(null)
+        return id
+    }
+
+    fun next(state0: Int, arc: Int): Int {
+        var state = state0
+        while (state != 0 && !edges[state].containsKey(arc)) state = fail[state]
+        return edges[state][arc] ?: 0
+    }
+
+    fun isForbidden(state: Int) = forbidden[state]
+
+    fun blocks(state: Int, arc: Int): Boolean {
+        val allowed = onlyAllowed[state]
+        if (allowed != null && arc !in allowed) return true
+        return forbidden[next(state, arc)]
+    }
+}
+
 class Graph(file: File) {
     private val buf: ByteBuffer
     val nodes: Int
@@ -64,6 +156,9 @@ class Graph(file: File) {
     private val gw: Int
     private val gh: Int
     private val cellDataLen: Int
+    private val turnRestrictions = HashSet<Long>()
+    private val conditionalTurnRestrictions = ArrayList<ConditionalTurn>()
+    private lateinit var restrictionAutomaton: RestrictionAutomaton
 
     private val oNLat: Int
     private val oNLon: Int
@@ -89,6 +184,8 @@ class Graph(file: File) {
         buf = raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length()).order(ByteOrder.LITTLE_ENDIAN)
         raf.close()
         require(buf.getInt(0) == 0x32474B4F) { "graph.bin: wrong format" }
+        val formatVersion = buf.getInt(4)
+        require(formatVersion == 1 || formatVersion == 2 || formatVersion == 3 || formatVersion == 4) { "graph.bin: unsupported version $formatVersion" }
         nodes = buf.getInt(8)
         segments = buf.getInt(12)
         shapePts = buf.getInt(16)
@@ -102,6 +199,10 @@ class Graph(file: File) {
         gw = buf.getInt(48)
         gh = buf.getInt(52)
         cellDataLen = buf.getInt(56)
+        require(nodes > 0 && segments > 0 && shapePts >= 0 && adjLen >= 0 &&
+            nameCount >= 0 && nameBytes >= 0 && cell > 0 && gw > 0 && gh > 0 &&
+            cellDataLen >= 0 && segments <= Int.MAX_VALUE / 2 &&
+            gw.toLong() * gh.toLong() < Int.MAX_VALUE / 4) { "graph.bin: invalid header dimensions" }
 
         fun pad4(v: Int) = v + ((4 - v % 4) % 4)
         var p = 80
@@ -123,6 +224,82 @@ class Graph(file: File) {
         oNameBytes = p; p += pad4(nameBytes)
         oCellStart = p; p += 4 * (gw * gh + 1)
         oCellData = p
+        val baseEndLong = oCellData.toLong() + 4L * cellDataLen
+        require(baseEndLong >= oCellData.toLong() && baseEndLong <= buf.limit().toLong()) {
+            "graph.bin: truncated cell index"
+        }
+        val sequenceRestrictions = ArrayList<SequenceRestriction>()
+        if (formatVersion == 1) {
+            require(baseEndLong == buf.limit().toLong()) { "graph.bin: unexpected trailing data in v1" }
+        } else {
+            require(baseEndLong + 4L <= buf.limit().toLong()) { "graph.bin: missing turn section" }
+            val turnOffset = baseEndLong.toInt()
+            val count = buf.getInt(turnOffset)
+            val turnEndLong = turnOffset.toLong() + 4L + count.toLong() * 8L
+            require(count >= 0 && turnEndLong <= buf.limit().toLong()) { "graph.bin: invalid turn section size" }
+            var q = turnOffset + 4
+            repeat(count) {
+                val incoming = buf.getInt(q); q += 4
+                val outgoing = buf.getInt(q); q += 4
+                require(incoming >= 0 && incoming < segments * 2 && outgoing >= 0 && outgoing < segments * 2) {
+                    "graph.bin: invalid turn arc"
+                }
+                turnRestrictions.add((incoming.toLong() shl 32) or (outgoing.toLong() and 0xffffffffL))
+            }
+            if (formatVersion == 2) {
+                require(turnEndLong == buf.limit().toLong()) { "graph.bin: unexpected trailing data in v2" }
+            } else {
+                require(turnEndLong + 4L <= buf.limit().toLong()) { "graph.bin: missing sequence section" }
+                q = turnEndLong.toInt()
+                val sequenceCount = buf.getInt(q); q += 4
+                require(sequenceCount >= 0) { "graph.bin: invalid sequence count" }
+                repeat(sequenceCount) {
+                    require(q.toLong() + 12L <= buf.limit().toLong()) { "graph.bin: truncated sequence header" }
+                    val type = buf.getInt(q); q += 4
+                    val prefixCount = buf.getInt(q); q += 4
+                    val allowedCount = buf.getInt(q); q += 4
+                    require((type == 1 || type == 2) && prefixCount > 0 && allowedCount >= 0 &&
+                        (type != 1 || allowedCount == 0) && (type != 2 || allowedCount > 0)) {
+                        "graph.bin: invalid sequence header"
+                    }
+                    val total = prefixCount.toLong() + allowedCount.toLong()
+                    require(total <= Int.MAX_VALUE / 4 && q.toLong() + total * 4L <= buf.limit().toLong()) {
+                        "graph.bin: truncated sequence arcs"
+                    }
+                    val prefix = IntArray(prefixCount) { buf.getInt(q + it * 4) }
+                    q += prefixCount * 4
+                    val allowed = IntArray(allowedCount) { buf.getInt(q + it * 4) }
+                    q += allowedCount * 4
+                    require((prefix.asSequence() + allowed.asSequence()).all { it >= 0 && it < segments * 2 }) {
+                        "graph.bin: sequence arc out of range"
+                    }
+                    sequenceRestrictions.add(SequenceRestriction(type, prefix, allowed))
+                }
+                if (formatVersion == 3) {
+                    require(q == buf.limit()) { "graph.bin: unexpected trailing sequence data" }
+                } else {
+                    require(q.toLong() + 4L <= buf.limit().toLong()) { "graph.bin: missing conditional turn section" }
+                    val conditionalCount = buf.getInt(q); q += 4
+                    require(conditionalCount >= 0 &&
+                        q.toLong() + conditionalCount.toLong() * 20L <= buf.limit().toLong()) {
+                        "graph.bin: invalid conditional turn section size"
+                    }
+                    repeat(conditionalCount) {
+                        val incoming = buf.getInt(q); q += 4
+                        val outgoing = buf.getInt(q); q += 4
+                        val days = buf.getInt(q); q += 4
+                        val startMinute = buf.getInt(q); q += 4
+                        val endMinute = buf.getInt(q); q += 4
+                        require(incoming in 0 until segments * 2 && outgoing in 0 until segments * 2 &&
+                            days in 1..0x7f && startMinute in 0..1439 && endMinute in 1..1440 &&
+                            startMinute < endMinute) { "graph.bin: invalid conditional turn record" }
+                        conditionalTurnRestrictions.add(ConditionalTurn(incoming, outgoing, days, startMinute, endMinute))
+                    }
+                    require(q == buf.limit()) { "graph.bin: unexpected trailing conditional turn data" }
+                }
+            }
+        }
+        restrictionAutomaton = RestrictionAutomaton(sequenceRestrictions)
     }
 
     // ---- raw accessors
@@ -182,7 +359,7 @@ class Graph(file: File) {
         val cy = (Math.floor(lat * 1e6).toLong() - lat0) / cell
         val cx = (Math.floor(lon * 1e6).toLong() - lon0) / cell
         val k = cos(Math.toRadians(lat))
-        val cellMeters = cell * 1e-6 * 111320.0 * k
+        val cellMeters = cell * 1e-6 * 111320.0 * min(1.0, k)
         var best: Snap? = null
         for (r in 0 until 40) {
             for (y in (cy - r).toInt()..(cy + r).toInt()) {
@@ -262,11 +439,11 @@ class Graph(file: File) {
     // ------------------------------------------------------------------ routing (A*)
     private class Heap {
         var keys = DoubleArray(1024)
-        var vals = IntArray(1024)
+        var vals = LongArray(1024)
         var size = 0
         var topKey = 0.0
 
-        fun push(k: Double, v: Int) {
+        fun push(k: Double, v: Long) {
             if (size == keys.size) {
                 keys = keys.copyOf(size * 2)
                 vals = vals.copyOf(size * 2)
@@ -283,8 +460,7 @@ class Graph(file: File) {
             vals[i] = v
         }
 
-        /** removes the smallest entry; its key is left in [topKey] */
-        fun pop(): Int {
+        fun pop(): Long {
             val res = vals[0]
             topKey = keys[0]
             size--
@@ -309,90 +485,215 @@ class Graph(file: File) {
     }
 
     /** Fastest route between two snapped points, or null if they are not connected (one-way streets respected). */
-    fun route(s: Snap, e: Snap, avoidUnpaved: Boolean): List<Leg>? {
+    private fun forbiddenTurn(inArc: Int, outArc: Int, activeConditional: Set<Long>): Boolean {
+        val key = (inArc.toLong() shl 32) or (outArc.toLong() and 0xffffffffL)
+        return turnRestrictions.contains(key) || activeConditional.contains(key)
+    }
+
+    private fun activeConditionalTurnKeys(nowMillis: Long): Set<Long> {
+        if (conditionalTurnRestrictions.isEmpty()) return emptySet()
+        val calendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Asia/Tbilisi"))
+        calendar.timeInMillis = nowMillis
+        val dayIndex = (calendar.get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7 // Monday = 0
+        val dayBit = 1 shl dayIndex
+        val minute = calendar.get(java.util.Calendar.HOUR_OF_DAY) * 60 +
+            calendar.get(java.util.Calendar.MINUTE)
+        return conditionalTurnRestrictions.asSequence()
+            .filter { (it.days and dayBit) != 0 && minute >= it.startMinute && minute < it.endMinute }
+            .mapTo(HashSet()) { (it.incoming.toLong() shl 32) or (it.outgoing.toLong() and 0xffffffffL) }
+    }
+
+    /** Fastest route using directed-arc states; the incoming road is retained at every junction. */
+    fun route(
+        s: Snap, e: Snap, avoidUnpaved: Boolean,
+        penalizedArcs: Set<Int> = emptySet(), penaltyFactor: Double = 1.0,
+        nowMillis: Long = System.currentTimeMillis()
+    ): List<Leg>? {
+        val activeConditional = activeConditionalTurnKeys(nowMillis)
         val inf = Double.MAX_VALUE
-        val g = DoubleArray(nodes) { inf }
-        val prevNode = IntArray(nodes) { -1 }
-        val prevSeg = IntArray(nodes) { -1 }
-        val closed = BooleanArray(nodes)
+        val penaltyMultiplier = if (penaltyFactor.isFinite()) max(1.0, penaltyFactor) else 1.0
+        fun adjustedCost(segment: Int, meters: Double, arc: Int): Double {
+            val base = cost(segment, meters, avoidUnpaved)
+            return if (arc in penalizedArcs) base * penaltyMultiplier else base
+        }
         val heap = Heap()
+        val g = HashMap<Long, Double>()
+        val prev = HashMap<Long, Long>()
+        val closed = HashSet<Long>()
         val vmax = maxKmh / 3.6
-
-        fun h(n: Int) = haversine(nLat(n), nLon(n), e.lat, e.lon) / vmax
-
+        fun h(node: Int) = haversine(nLat(node), nLon(node), e.lat, e.lon) / vmax
+        fun key(arc: Int, automaton: Int) =
+            (arc.toLong() shl 32) or (automaton.toLong() and 0xffffffffL)
+        fun arcOf(state: Long) = (state ushr 32).toInt()
+        fun automatonOf(state: Long) = state.toInt()
         val ks = s.seg
         val ke = e.seg
         val ls = segLen(ks)
         val le = segLen(ke)
-        var best = inf
-        var bestEnd = -1
-        var direct = false
+        fun arcEnd(arc: Int): Int = if ((arc and 1) == 0) segB(arc / 2) else segA(arc / 2)
 
-        if (ks == ke) {
-            if (e.off >= s.off && canForward(ks)) { best = cost(ks, e.off - s.off, avoidUnpaved); direct = true }
-            else if (e.off < s.off && canBackward(ks)) { best = cost(ks, s.off - e.off, avoidUnpaved); direct = true }
+        fun addStart(arc: Int, node: Int, partialCost: Double) {
+            val ac = restrictionAutomaton.next(0, arc)
+            if (restrictionAutomaton.isForbidden(ac)) return
+            val state = key(arc, ac)
+            if (partialCost < (g[state] ?: inf)) {
+                g[state] = partialCost
+                heap.push(partialCost + h(node), state)
+            }
         }
-        if (canBackward(ks)) {
-            val a = segA(ks)
-            g[a] = cost(ks, s.off, avoidUnpaved)
-            heap.push(g[a] + h(a), a)
+        val startAtNode = s.off <= 1.0 || ls - s.off <= 1.0
+        val startNode = when {
+            s.off <= 1.0 -> segA(ks)
+            ls - s.off <= 1.0 -> segB(ks)
+            else -> -1
         }
-        if (canForward(ks)) {
-            val b = segB(ks)
-            val c = cost(ks, ls - s.off, avoidUnpaved)
-            if (c < g[b]) { g[b] = c; heap.push(c + h(b), b) }
-        }
-        var endA = inf   // arrive at the end point through node A (travelling A -> B)
-        var endB = inf   // arrive through node B (travelling B -> A)
-        if (canForward(ke)) endA = cost(ke, e.off, avoidUnpaved)
-        if (canBackward(ke)) endB = cost(ke, le - e.off, avoidUnpaved)
-        val nodeEndA = segA(ke)
-        val nodeEndB = segB(ke)
-
-        while (heap.size > 0) {
-            val u = heap.pop()
-            if (heap.topKey >= best) break
-            if (closed[u]) continue
-            closed[u] = true
-            if (u == nodeEndA && endA < inf && g[u] + endA < best) { best = g[u] + endA; bestEnd = u; direct = false }
-            if (u == nodeEndB && endB < inf && g[u] + endB < best) { best = g[u] + endB; bestEnd = u; direct = false }
-            val from = adjStart(u)
-            val to = adjStart(u + 1)
-            for (i in from until to) {
+        if (startAtNode) {
+            // At a junction there is no incoming road. Seed every legal outgoing arc
+            // directly, otherwise a zero-length fake arrival can trigger a turn restriction.
+            for (i in adjStart(startNode) until adjStart(startNode + 1)) {
                 val k = adj(i)
-                val v: Int
-                if (segA(k) == u && canForward(k)) v = segB(k)
-                else if (segB(k) == u && canBackward(k)) v = segA(k)
-                else continue
-                if (closed[v]) continue
-                val c = g[u] + cost(k, segLen(k), avoidUnpaved)
-                if (c < g[v]) {
-                    g[v] = c
-                    prevNode[v] = u
-                    prevSeg[v] = k
-                    heap.push(c + h(v), v)
+                if (segA(k) == startNode && canForward(k)) {
+                    addStart(2 * k, segB(k), adjustedCost(k, segLen(k), 2 * k))
+                } else if (segB(k) == startNode && canBackward(k)) {
+                    addStart(2 * k + 1, segA(k), adjustedCost(k, segLen(k), 2 * k + 1))
+                }
+            }
+        } else {
+            if (canBackward(ks)) addStart(2 * ks + 1, segA(ks), adjustedCost(ks, s.off, 2 * ks + 1))
+            if (canForward(ks)) addStart(2 * ks, segB(ks), adjustedCost(ks, ls - s.off, 2 * ks))
+        }
+
+        var best = inf
+        var bestState = -1L
+        var bestEndArc = -1
+        var directStartLeg: Leg? = null
+        // Same-segment travel is a candidate, not an unconditional shortcut: a paved bypass
+        // may be faster than an avoided unpaved segment.
+        if (ks == ke) {
+            if (e.off >= s.off && canForward(ks)) {
+                best = adjustedCost(ks, e.off - s.off, 2 * ks)
+                directStartLeg = Leg(ks, s.off, e.off, -1)
+            }
+            if (e.off < s.off && canBackward(ks)) {
+                val direct = adjustedCost(ks, s.off - e.off, 2 * ks + 1)
+                if (direct < best) {
+                    best = direct
+                    directStartLeg = Leg(ks, s.off, e.off, -1)
                 }
             }
         }
-
-        if (direct) return listOf(Leg(ks, s.off, e.off, -1))
-        if (bestEnd < 0) return null
-
-        val legs = ArrayList<Leg>()
-        // last leg: from the end node to the end point
-        legs.add(if (bestEnd == nodeEndA) Leg(ke, 0.0, e.off, -1) else Leg(ke, le, e.off, -1))
-        var u = bestEnd
-        while (prevNode[u] >= 0) {
-            val k = prevSeg[u]
-            val p = prevNode[u]
-            val l = segLen(k)
-            legs.add(if (segA(k) == p) Leg(k, 0.0, l, u) else Leg(k, l, 0.0, u))
-            u = p
+        if (startAtNode && startNode == segA(ke) && canForward(ke)) {
+            val direct = adjustedCost(ke, e.off, 2 * ke)
+            if (direct < best) {
+                best = direct
+                directStartLeg = Leg(ke, 0.0, e.off, -1)
+            }
         }
-        // first leg: from the start point to the start node u
-        legs.add(if (u == segA(ks)) Leg(ks, s.off, 0.0, u) else Leg(ks, s.off, ls, u))
-        legs.reverse()
+        if (startAtNode && startNode == segB(ke) && canBackward(ke)) {
+            val direct = adjustedCost(ke, le - e.off, 2 * ke + 1)
+            if (direct < best) {
+                best = direct
+                directStartLeg = Leg(ke, le, e.off, -1)
+            }
+        }
+        while (heap.size > 0) {
+            val state = heap.pop()
+            if (heap.topKey >= best) break
+            if (!closed.add(state)) continue
+            val inArc = arcOf(state)
+            val acState = automatonOf(state)
+            val node = arcEnd(inArc)
+            val currentCost = g[state] ?: continue
+            if (node == segA(ke) && canForward(ke)) {
+                val endArc = 2 * ke
+                val tail = adjustedCost(ke, e.off, endArc)
+                if (!forbiddenTurn(inArc = inArc, outArc = endArc, activeConditional = activeConditional) && !restrictionAutomaton.blocks(acState, endArc) &&
+                    currentCost + tail < best) {
+                    best = currentCost + tail; bestState = state; bestEndArc = endArc
+                }
+            }
+            if (node == segB(ke) && canBackward(ke)) {
+                val endArc = 2 * ke + 1
+                val tail = adjustedCost(ke, le - e.off, endArc)
+                if (!forbiddenTurn(inArc = inArc, outArc = endArc, activeConditional = activeConditional) && !restrictionAutomaton.blocks(acState, endArc) &&
+                    currentCost + tail < best) {
+                    best = currentCost + tail; bestState = state; bestEndArc = endArc
+                }
+            }
+            for (i in adjStart(node) until adjStart(node + 1)) {
+                val k = adj(i)
+                val outArc: Int
+                val next: Int
+                if (segA(k) == node && canForward(k)) { outArc = 2 * k; next = segB(k) }
+                else if (segB(k) == node && canBackward(k)) { outArc = 2 * k + 1; next = segA(k) }
+                else continue
+                if (forbiddenTurn(inArc = inArc, outArc = outArc, activeConditional = activeConditional) || restrictionAutomaton.blocks(acState, outArc)) continue
+                val nextAc = restrictionAutomaton.next(acState, outArc)
+                if (restrictionAutomaton.isForbidden(nextAc)) continue
+                val nextState = key(outArc, nextAc)
+                if (nextState in closed) continue
+                val candidate = currentCost + adjustedCost(k, segLen(k), outArc)
+                if (candidate < (g[nextState] ?: inf)) {
+                    g[nextState] = candidate
+                    prev[nextState] = state
+                    heap.push(candidate + h(next), nextState)
+                }
+            }
+        }
+        if (bestState < 0L) return directStartLeg?.let { listOf(it) }
+        val states = ArrayList<Int>()
+        var state = bestState
+        while (state >= 0L) {
+            states.add(arcOf(state))
+            state = prev[state] ?: -1L
+        }
+        states.reverse()
+        val legs = ArrayList<Leg>()
+        val firstArc = states[0]
+        if (startAtNode) {
+            val firstSeg = firstArc / 2
+            val firstLen = segLen(firstSeg)
+            legs.add(if ((firstArc and 1) == 0) Leg(firstSeg, 0.0, firstLen, segB(firstSeg))
+                     else Leg(firstSeg, firstLen, 0.0, segA(firstSeg)))
+        } else {
+            legs.add(if ((firstArc and 1) == 0) Leg(ks, s.off, ls, segB(ks))
+                     else Leg(ks, s.off, 0.0, segA(ks)))
+        }
+        for (i in 1 until states.size) {
+            val arc = states[i]
+            val k = arc / 2
+            val len = segLen(k)
+            legs.add(if ((arc and 1) == 0) Leg(k, 0.0, len, segB(k)) else Leg(k, len, 0.0, segA(k)))
+        }
+        legs.add(if ((bestEndArc and 1) == 0) Leg(ke, 0.0, e.off, -1) else Leg(ke, le, e.off, -1))
         return legs
+    }
+
+    /**
+     * Find a meaningfully different second route by penalizing every directed arc
+     * used by the primary route. Return it only when the real travel cost stays reasonable.
+     */
+    fun routeAlternative(
+        s: Snap, e: Snap, avoidUnpaved: Boolean, primary: List<Leg>,
+        nowMillis: Long = System.currentTimeMillis()
+    ): List<Leg>? {
+        val primaryArcs = primary.mapTo(HashSet()) {
+            2 * it.seg + if (it.to < it.from) 1 else 0
+        }
+        if (primaryArcs.isEmpty()) return null
+        val alternative = route(s, e, avoidUnpaved, primaryArcs, 3.0, nowMillis) ?: return null
+        val alternativeArcs = alternative.mapTo(HashSet()) {
+            2 * it.seg + if (it.to < it.from) 1 else 0
+        }
+        if (alternativeArcs == primaryArcs) return null
+        val union = primaryArcs + alternativeArcs
+        val overlap = primaryArcs.intersect(alternativeArcs).size.toDouble() / union.size.coerceAtLeast(1)
+        if (overlap > 0.90) return null
+        fun realCost(path: List<Leg>) = path.sumOf { cost(it.seg, abs(it.to - it.from), avoidUnpaved) }
+        val primaryCost = realCost(primary)
+        val alternativeCost = realCost(alternative)
+        if (primaryCost <= 0.0 || alternativeCost > primaryCost * 1.8) return null
+        return alternative
     }
 
     // ------------------------------------------------------------------ route geometry + instructions
@@ -490,19 +791,30 @@ class Graph(file: File) {
         }
     }
 
-    fun buildRoute(legs: List<Leg>): Route {
+    fun buildRoute(legs: List<Leg>, avoidUnpaved: Boolean): Route {
         val la = DList()
         val lo = DList()
         val boundary = IntArray(legs.size)         // index of the last point of each leg in the polyline
-        var seconds = 0.0
         for ((i, l) in legs.withIndex()) {
             appendSlice(l.seg, l.from, l.to, la, lo)
             boundary[i] = la.n - 1
-            seconds += abs(l.to - l.from) / (max(5, segKmh(l.seg)) / 3.6)
         }
         val n = la.n
         val cum = DoubleArray(n)
         for (i in 1 until n) cum[i] = cum[i - 1] + haversine(la.a[i - 1], lo.a[i - 1], la.a[i], lo.a[i])
+        // Distribute each leg's penalized travel time over its actual polyline pieces.
+        val timeCum = DoubleArray(n)
+        var legStart = 0
+        for ((i, leg) in legs.withIndex()) {
+            val legEnd = boundary[i].coerceAtLeast(legStart).coerceAtMost(n - 1)
+            val secondsPerMeter = cost(leg.seg, abs(leg.to - leg.from), avoidUnpaved) /
+                max(1e-6, abs(leg.to - leg.from))
+            for (j in legStart + 1..legEnd) {
+                timeCum[j] = timeCum[j - 1] + (cum[j] - cum[j - 1]) * secondsPerMeter
+            }
+            legStart = legEnd
+        }
+        val totalSeconds = timeCum.lastOrNull() ?: 0.0
 
         val steps = ArrayList<Step>()
         steps.add(Step(Maneuver.DEPART, maneuverText(Maneuver.DEPART, streetName(legs[0].seg), 0),
@@ -566,7 +878,7 @@ class Graph(file: File) {
             if (type >= 0) steps.add(Step(type, maneuverText(type, nameB, 0), nameB, idx, 0))
         }
         steps.add(Step(Maneuver.ARRIVE, maneuverText(Maneuver.ARRIVE, "", 0), "", n - 1, 0))
-        return Route(la.a.copyOf(n), lo.a.copyOf(n), cum, steps, seconds)
+        return Route(la.a.copyOf(n), lo.a.copyOf(n), cum, timeCum, steps, totalSeconds)
     }
 
     companion object {

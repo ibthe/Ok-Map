@@ -69,6 +69,7 @@ class Navigator(
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var pendingSpeech: String? = null
+    @Volatile private var disposed = false
 
     val active: Boolean get() = state != State.IDLE
     val navigating: Boolean get() = state == State.NAV
@@ -133,6 +134,7 @@ class Navigator(
 
     // ------------------------------------------------------------------ planning
     fun planTo(lat: Double, lon: Double, title: String, fromLat: Double, fromLon: Double, silent: Boolean = false) {
+        if (disposed) return
         val f = graphFile()
         if (f == null) {
             toast("Нет данных дорог: в приложении не найден graph.bin")
@@ -143,6 +145,7 @@ class Navigator(
         if (!silent) toast("Строю маршрут…")
         thread(name = "route") {
             var result: Route? = null
+            var alternative: Route? = null
             var error: String? = null
             var sd = 0.0
             var ed = 0.0
@@ -157,7 +160,13 @@ class Navigator(
                     sd = s.dist; ed = e.dist
                     val legs = g.route(s, e, avoid)
                     if (legs == null) error = "Маршрут не найден: дороги в этих местах не связаны"
-                    else result = g.buildRoute(legs)
+                    else {
+                        result = g.buildRoute(legs, avoid)
+                        if (!silent) {
+                            val alternativeLegs = g.routeAlternative(s, e, avoid, legs)
+                            if (alternativeLegs != null) alternative = g.buildRoute(alternativeLegs, avoid)
+                        }
+                    }
                 }
             } catch (ex: Exception) {
                 error = "Ошибка маршрута: ${ex.message}"
@@ -166,28 +175,46 @@ class Navigator(
             }
             act.runOnUiThread {
                 busy = false
+                if (disposed || act.isFinishing || act.isDestroyed) return@runOnUiThread
                 if (silent && !navigating) return@runOnUiThread        // navigation was ended while rerouting
                 val r = result
                 if (error != null || r == null) { toast(error ?: "Маршрут не найден"); return@runOnUiThread }
-                val accept = {
+                val accept: (Route) -> Unit = { selected ->
                     destLat = lat; destLon = lon; destTitle = title
                     this.fromLat = fromLat; this.fromLon = fromLon
                     connStart = sd; connEnd = ed
-                    applyRoute(r, silent)
+                    applyRoute(selected, silent)
                 }
                 when {
-                    silent -> accept()
+                    silent -> accept(r)
                     sd > 200_000.0 -> farFromMap(sd, lat, lon, title)
                     maxOf(sd, ed) > 30_000.0 -> MaterialAlertDialogBuilder(act)
                         .setTitle("Дорога далеко")
                         .setMessage(("Ближайшая дорога: ${if (sd > 30_000.0) "к месту старта" else "к точке назначения"} " +
                             "в ${Geo.fmtDist(maxOf(sd, ed))}. Построить маршрут до неё и дальше по прямой?"))
-                        .setPositiveButton("Построить") { _, _ -> accept() }
+                        .setPositiveButton("Построить") { _, _ -> accept(r) }
                         .setNegativeButton("Отмена", null).show()
-                    else -> accept()
+                    else -> {
+                        val alt = alternative
+                        if (alt != null) chooseRoute(r, alt, accept) else accept(r)
+                    }
                 }
             }
         }
+    }
+
+    private fun chooseRoute(primary: Route, alternative: Route, onSelected: (Route) -> Unit) {
+        fun label(title: String, route: Route): String {
+            val minutes = ((route.seconds / 60.0) + 0.5).toInt().coerceAtLeast(1)
+            return "$title · ${Geo.fmtDist(route.distance)} · $minutes мин"
+        }
+        MaterialAlertDialogBuilder(act)
+            .setTitle("Выберите маршрут")
+            .setItems(arrayOf(label("Основной", primary), label("Альтернативный", alternative))) { _, index ->
+                onSelected(if (index == 0) primary else alternative)
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
     }
 
     /** The user is far outside the map (e.g. testing at home): offer the crosshair as an explicit start. */
@@ -277,7 +304,7 @@ class Navigator(
         if (!navigating) return
         val n = r.lat.size
         // nearest point of the route in a window around the last known position
-        val from = max(0, progressIdx - 3)
+        val from = max(0, progressIdx - 400)
         val to = min(n - 2, progressIdx + 400)
         val k = cos(Math.toRadians(l.latitude))
         var bestD = Double.MAX_VALUE
@@ -298,9 +325,30 @@ class Navigator(
             }
         }
         val tolerance = max(35.0, l.accuracy * 1.5)
-        if (bestD <= tolerance) {
+        val onRoute = bestD <= tolerance
+        if (onRoute) {
             offCount = 0
-            if (bestAlong >= along - 20.0) { progressIdx = bestJ; along = max(along, bestAlong) }
+            // Permit real reverse travel along the route; otherwise progress can stay near
+            // the destination forever after a U-turn and falsely announce arrival.
+            var movingAgainstRoute = false
+            if (l.hasBearing() && l.hasSpeed() && l.speed > 3f && bestJ < n - 1) {
+                val routeBearing = FloatArray(3)
+                Location.distanceBetween(r.lat[bestJ], r.lon[bestJ],
+                    r.lat[bestJ + 1], r.lon[bestJ + 1], routeBearing)
+                val delta = kotlin.math.abs((l.bearing - routeBearing[0] + 540f) % 360f - 180f)
+                movingAgainstRoute = delta > 115f
+            }
+            if (bestAlong >= along - 20.0) {
+                progressIdx = bestJ
+                along = max(along, bestAlong)
+            } else if (movingAgainstRoute) {
+                progressIdx = bestJ
+                along = bestAlong
+                // Maneuvers passed earlier are ahead again after reversing; allow them to be announced anew.
+                for (i in announced.indices) {
+                    if (r.cum[r.steps[i].pointIdx] > along + 50.0) announced[i] = 0
+                }
+            }
         } else {
             offCount++
             val now = System.currentTimeMillis()
@@ -312,9 +360,15 @@ class Navigator(
             }
         }
         updateGuidance(l)
-        if (r.distance - along < 25.0) {
-            speak("Вы прибыли в пункт назначения")
-            toast("Вы прибыли")
+        if (onRoute && r.distance - bestAlong < 25.0) {
+            if (connEnd > 50.0) {
+                val message = "Маршрут по дорогам завершён. До точки назначения ещё ${Geo.fmtDist(connEnd)} по прямой"
+                speak(message)
+                toast(message)
+            } else {
+                speak("Вы прибыли в пункт назначения")
+                toast("Вы прибыли")
+            }
             stop()
             return
         }
@@ -342,7 +396,7 @@ class Navigator(
         btnGo.visibility = if (preview) View.VISIBLE else View.GONE
         btnCancel.text = if (preview) "Отмена" else "Завершить"
         val r = route ?: return
-        updateStats(r.distance - along, r.seconds * max(0.0, r.distance - along) / max(1.0, r.distance))
+        updateStats(r.distance - along, r.remainingSeconds(along))
         if (preview) navSub.text = previewSub()
     }
 
@@ -363,7 +417,8 @@ class Navigator(
     private fun updateGuidance(l: Location?) {
         val r = route ?: return
         val rest = max(0.0, r.distance - along)
-        updateStats(rest, r.seconds * rest / max(1.0, r.distance))
+        updateStats(rest, r.remainingSeconds(along))
+        while (stepIdx > 1 && r.cum[r.steps[stepIdx - 1].pointIdx] > along + 8.0) stepIdx--
         while (stepIdx < r.steps.size - 1 && r.cum[r.steps[stepIdx].pointIdx] <= along + 8.0) stepIdx++
         val st = r.steps[min(stepIdx, r.steps.size - 1)]
         val dist = max(0.0, r.cum[st.pointIdx] - along)
@@ -419,9 +474,11 @@ class Navigator(
     }
 
     private fun initTts() {
-        if (tts != null) return
+        if (disposed || tts != null) return
         tts = TextToSpeech(act) { status ->
-            if (status == TextToSpeech.SUCCESS) {
+            if (disposed || act.isFinishing || act.isDestroyed) {
+                tts?.shutdown(); tts = null
+            } else if (status == TextToSpeech.SUCCESS) {
                 val res = tts?.setLanguage(Locale("ru", "RU"))
                 ttsReady = res != null && res >= TextToSpeech.LANG_AVAILABLE
                 tts?.setAudioAttributes(AudioAttributes.Builder()
@@ -435,12 +492,17 @@ class Navigator(
     }
 
     private fun speak(text: String) {
-        if (!prefs.getBoolean("nav_voice", true)) return
+        if (disposed || !prefs.getBoolean("nav_voice", true)) return
         if (ttsReady) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "nav") else pendingSpeech = text
     }
 
     fun shutdown() {
-        tts?.shutdown(); tts = null
+        if (disposed) return
+        disposed = true
+        if (active) stop() // the Activity owns route progress; never leave an orphaned foreground navigation service
+        tts?.stop(); tts?.shutdown(); tts = null
+        ttsReady = false
+        pendingSpeech = null
     }
 
     private fun toast(s: String) = Toast.makeText(act, s, Toast.LENGTH_SHORT).show()

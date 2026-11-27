@@ -353,9 +353,12 @@ if SAT:
             l["paint"] = {"hillshade-exaggeration": zi((5, 0.62), (9, 0.52), (12, 0.34), (14, 0.22), base=1),
                           "hillshade-illumination-direction": 315, "hillshade-shadow-color": "#000000",
                           "hillshade-highlight-color": "#ffffff", "hillshade-accent-color": "#1c261c"}
-    # real imagery (optional sat.mbtiles, raster): drawn right above the background; the app hides the flat
-    # land / water fills when the file exists, and removes this layer when it does not
-    L.insert(1, {"id": "sat-imagery", "type": "raster", "source": "sat", "paint": {"raster-fade-duration": 0}})
+    # Put every base fill below the raster and every cartographic overlay above it. Missing
+    # imagery tiles then reveal the vector map, while roads, labels and hillshade stay legible.
+    base = [layer for layer in L if layer["type"] in ("background", "fill")]
+    overlays = [layer for layer in L if layer["type"] not in ("background", "fill")]
+    L = base + [{"id": "sat-imagery", "type": "raster", "source": "sat",
+                 "paint": {"raster-fade-duration": 0}}] + overlays
 
 style = {
     "version": 8,
@@ -367,7 +370,7 @@ style = {
         # problem can never hide the roads/water/landcover of a tile
         "openmaptiles-labels": {"type": "vector", "url": "__MBTILES_URL__"},
         **({"sat": {"type": "raster", "url": "__SAT_URL__", "tileSize": 256,
-                    "attribution": "Imagery: see the provider of sat.mbtiles"}} if SAT else {}),
+                    "attribution": "Orthophoto: © National Agency of Public Registry of Georgia (NAPR)"}} if SAT else {}),
         "relief": {"type": "raster-dem", "url": "__RELIEF_URL__", "tileSize": 256, "encoding": "terrarium",
                    "attribution": "Terrain: Mapzen/AWS Terrain Tiles (SRTM, ASTER, others)"},
     },

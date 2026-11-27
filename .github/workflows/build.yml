@@ -2,11 +2,15 @@ name: Build Ok Map APK
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, feature/offline-navigation]
   workflow_dispatch:
     inputs:
       osm_url:
         description: "Optional: direct link to a .osm.pbf of Georgia (country) if automatic download fails"
+        required: false
+        default: ""
+      map_data_revision:
+        description: "Optional: change this value to force rebuilding cached OSM map data (for example, 2026-11)"
         required: false
         default: ""
       sat_url:
@@ -21,10 +25,18 @@ on:
         description: "Max zoom of the imagery for the whole country (empty = 12; each level is about 3-4x bigger)"
         required: false
         default: ""
+      sat_min_zoom:
+        description: "Min zoom of the imagery for the whole country (empty = 10)"
+        required: false
+        default: ""
       sat_detail:
         description: "Extra high-zoom areas separated by spaces: west,south,east,north,zoom (empty = Tbilisi z16, none = no extra areas)"
         required: false
         default: ""
+
+concurrency:
+  group: ok-map-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -35,7 +47,9 @@ jobs:
       # Put "none" into sat_tiles when starting the workflow by hand to build without imagery.
       SAT_TILES: ${{ inputs.sat_tiles || 'https://nt0.napr.gov.ge/NGCache?x={x}&y={y}&z={z}&l=ORTHO_GEORGIA_4' }}
       SAT_ZOOM: ${{ inputs.sat_zoom || '12' }}
+      SAT_MIN_ZOOM: ${{ inputs.sat_min_zoom || '10' }}
       SAT_DETAIL: ${{ inputs.sat_detail || '44.70,41.62,44.95,41.80,16' }}
+      SAT_URL: ${{ inputs.sat_url || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -48,6 +62,26 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Calculate map-data cache key
+        id: mapcache
+        shell: bash
+        env:
+          OSM_URL: ${{ inputs.osm_url || '' }}
+          MAP_DATA_REVISION: ${{ inputs.map_data_revision || 'default' }}
+        run: |
+          # Every cached dataset builder must participate in the cache key.
+          # Otherwise a stamp mismatch rebuilds the asset on every run, but an exact
+          # cache hit prevents the corrected asset from ever being saved.
+          HASH=$(
+            cat tools/fetch_osm.py tools/finalize_tiles.py tools/check_tiles.py tools/mvt.py \
+              tools/build_relief.py tools/build_places.py tools/build_contours.py |
+              sha256sum | cut -d' ' -f1
+          )
+          FETCH_HASH=$(sha256sum tools/fetch_osm.py | cut -d' ' -f1)
+          REV=$(printf '%s|%s|%s' "$OSM_URL" "$MAP_DATA_REVISION" "$FETCH_HASH" | sha256sum | cut -d' ' -f1)
+          echo "source_revision=$REV" >> "$GITHUB_OUTPUT"
+          echo "key=mapdata-v4-${HASH}-${REV}" >> "$GITHUB_OUTPUT"
+
       # Map data (tiles, search index, relief) is rebuilt only when the tile tools change.
       # Fonts and the style are NOT part of this cache: they are cheap and are rebuilt on every run.
       # restore-keys also picks up the cache of older runs, so changing fonts/design never
@@ -58,8 +92,10 @@ jobs:
         with:
           path: |
             app/src/main/assets/map.mbtiles
+            app/src/main/assets/map.stamp
             app/src/main/assets/places.db
             app/src/main/assets/relief.mbtiles
+            app/src/main/assets/relief.stamp
             app/src/main/assets/places.stamp
             app/src/main/assets/graph.bin
             app/src/main/assets/graph.stamp
@@ -69,35 +105,96 @@ jobs:
             app/src/main/assets/sat.stamp
           # build_places.py / reference_places.json are NOT in the key: they only rebuild the search index
           # (see "Decide what has to be rebuilt"), the 30-60 min tile build stays cached
-          key: mapdata-v3-${{ hashFiles('tools/fetch_osm.py', 'tools/finalize_tiles.py', 'tools/check_tiles.py', 'tools/mvt.py', 'tools/build_relief.py') }}
+          # Include the satellite builder and source/zoom configuration. Otherwise an exact cache hit
+          # prevents actions/cache from saving the freshly rebuilt sat.mbtiles and the download repeats.
+          key: ${{ steps.mapcache.outputs.key }}
           restore-keys: |
+            mapdata-v4-
             mapdata-v3-
             mapdata-v2-
+
+      # Satellite imagery has its own cache: changing a zoom/detail area must never
+      # invalidate the much larger base-map, search, and relief cache.
+      - name: Calculate satellite cache key
+        id: satcache
+        shell: bash
+        run: |
+          SAT_BUILDER_HASH="$(cat tools/build_satellite.py | sha256sum)"
+          SAT_HASH=$(printf '%s|%s|%s|%s|%s|%s' "$SAT_BUILDER_HASH" "$SAT_TILES" "$SAT_ZOOM" "$SAT_MIN_ZOOM" "$SAT_DETAIL" "$SAT_URL" | sha256sum | cut -d' ' -f1)
+          echo "key=$SAT_HASH" >> "$GITHUB_OUTPUT"
+
+      - name: Cache satellite imagery
+        uses: actions/cache@v4
+        with:
+          path: |
+            app/src/main/assets/sat.mbtiles
+            app/src/main/assets/sat.stamp
+          key: satellite-v2-${{ steps.satcache.outputs.key }}
+          restore-keys: |
+            satellite-v2-
+
+      # Keep the road graph in a separate cache keyed by its own builder. A graph-format
+      # change must not invalidate the much larger vector-tile / relief cache.
+      - name: Restore road graph cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            app/src/main/assets/graph.bin
+            app/src/main/assets/graph.stamp
+          key: roadgraph-v3-${{ hashFiles('tools/build_graph.py') }}-${{ steps.mapcache.outputs.source_revision }}
 
       # decided once, before anything is built (a file check per step would change mid-run)
       - name: Decide what has to be rebuilt
         id: need
+        env:
+          OSM_URL: ${{ inputs.osm_url || '' }}
+          MAP_DATA_REVISION: ${{ inputs.map_data_revision || 'default' }}
+          SOURCE_REVISION: ${{ steps.mapcache.outputs.source_revision }}
         run: |
           mkdir -p app/src/main/assets
-          [ -s app/src/main/assets/map.mbtiles ] || { echo "tiles=true" >> "$GITHUB_OUTPUT"; echo "places=true" >> "$GITHUB_OUTPUT"; }
+          # Cache restore-keys can restore an older map after a builder/source cache miss.
+          # Explicit stamps make sure stale map/relief assets are actually rebuilt.
+          MH=$(printf '%s|%s|%s' "$(cat tools/fetch_osm.py tools/finalize_tiles.py tools/check_tiles.py tools/mvt.py | sha256sum)" "$OSM_URL" "$MAP_DATA_REVISION" | sha256sum | cut -d' ' -f1)
+          echo "$MH" > /tmp/map.stamp
+          [ -s app/src/main/assets/map.mbtiles ] && [ "$(cat app/src/main/assets/map.stamp 2>/dev/null)" = "$MH" ] || { echo "tiles=true" >> "$GITHUB_OUTPUT"; echo "places=true" >> "$GITHUB_OUTPUT"; }
           [ -s app/src/main/assets/places.db ] || echo "places=true" >> "$GITHUB_OUTPUT"
+          RH=$(cat tools/build_relief.py | sha256sum | cut -d' ' -f1)
+          echo "$RH" > /tmp/relief.stamp
+          [ -s app/src/main/assets/relief.mbtiles ] && [ "$(cat app/src/main/assets/relief.stamp 2>/dev/null)" = "$RH" ] || echo "relief=true" >> "$GITHUB_OUTPUT"
           PH=$(cat tools/build_places.py tools/mvt.py tools/reference_places.json | sha1sum | cut -d' ' -f1)
           echo "$PH" > /tmp/places.stamp
           [ "$(cat app/src/main/assets/places.stamp 2>/dev/null)" = "$PH" ] || echo "places=true" >> "$GITHUB_OUTPUT"
           [ -s app/src/main/assets/graph.bin ] || echo "graph=true" >> "$GITHUB_OUTPUT"
-          GH=$(cat tools/build_graph.py | sha1sum | cut -d' ' -f1)
+          GH=$(printf '%s|%s' "$(cat tools/build_graph.py | sha1sum | cut -d' ' -f1)" "$SOURCE_REVISION" | sha256sum | cut -d' ' -f1)
           echo "$GH" > /tmp/graph.stamp
           [ "$(cat app/src/main/assets/graph.stamp 2>/dev/null)" = "$GH" ] || echo "graph=true" >> "$GITHUB_OUTPUT"
           [ -s app/src/main/assets/contours.mbtiles ] || echo "contours=true" >> "$GITHUB_OUTPUT"
           CH=$(cat tools/build_contours.py | sha1sum | cut -d' ' -f1)
           echo "$CH" > /tmp/contours.stamp
           [ "$(cat app/src/main/assets/contours.stamp 2>/dev/null)" = "$CH" ] || echo "contours=true" >> "$GITHUB_OUTPUT"
-          SH=$(printf '%s|%s|%s|%s' "$(cat tools/build_satellite.py | sha1sum)" "$SAT_TILES" "$SAT_ZOOM" "$SAT_DETAIL" | sha1sum | cut -d' ' -f1)
+          if [ "$SAT_MIN_ZOOM" = "10" ] && [ -z "$SAT_URL" ]; then
+            # Keep the existing default satellite stamp during migration to its own cache.
+            SAT_BUILDER_HASH="$(cat tools/build_satellite.py | sha1sum)"
+            SH=$(printf '%s|%s|%s|%s' "$SAT_BUILDER_HASH" "$SAT_TILES" "$SAT_ZOOM" "$SAT_DETAIL" | sha1sum | cut -d' ' -f1)
+          else
+            SAT_BUILDER_HASH="$(cat tools/build_satellite.py | sha256sum)"
+            SH=$(printf '%s|%s|%s|%s|%s|%s' "$SAT_BUILDER_HASH" "$SAT_TILES" "$SAT_ZOOM" "$SAT_MIN_ZOOM" "$SAT_DETAIL" "$SAT_URL" | sha256sum | cut -d' ' -f1)
+          fi
           echo "$SH" > /tmp/sat.stamp
           [ "$SAT_TILES" != "none" ] && { [ -s app/src/main/assets/sat.mbtiles ] || echo "sat=true" >> "$GITHUB_OUTPUT"; [ "$(cat app/src/main/assets/sat.stamp 2>/dev/null)" = "$SH" ] || echo "sat=true" >> "$GITHUB_OUTPUT"; }
           [ -s app/src/main/assets/relief.mbtiles ] || echo "relief=true" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
           ls -lh app/src/main/assets || true
+
+      - name: Run synthetic road graph tests
+        run: |
+          python -m pip install --quiet numpy
+          python tools/test_graph.py
+
+      - name: Test satellite imagery builder
+        run: |
+          python -m pip install --quiet pillow
+          python tools/test_satellite.py
 
       - name: Download OSM extract of Georgia (Geofabrik)
         if: steps.need.outputs.tiles == 'true' || steps.need.outputs.graph == 'true'
@@ -128,6 +225,7 @@ jobs:
         run: |
           python finalize_tiles.py ../app/src/main/assets/map.mbtiles
           python check_tiles.py ../app/src/main/assets/map.mbtiles
+          cp /tmp/map.stamp ../app/src/main/assets/map.stamp
 
       - name: Build offline search index
         if: steps.need.outputs.places == 'true'
@@ -136,25 +234,45 @@ jobs:
           python build_places.py ../app/src/main/assets/map.mbtiles ../app/src/main/assets/places.db
           cp /tmp/places.stamp ../app/src/main/assets/places.stamp
 
-      # Road graph for the offline car navigator. If this step fails, the APK is still built (without navigation).
+      # Road graph is required for the offline car navigator; failures must fail CI.
       - name: Build offline road graph (car router)
         if: steps.need.outputs.graph == 'true'
-        continue-on-error: true
         run: |
           python -m pip install --quiet osmium numpy
-          python tools/test_graph.py
           python tools/build_graph.py data/region.osm.pbf app/src/main/assets/graph.bin
           ls -lh app/src/main/assets/graph.bin
-          # smoke test on the real graph: Tbilisi -> Kutaisi by road is roughly 230 km
-          python tools/route_check.py app/src/main/assets/graph.bin 41.7151 44.8271 42.2679 42.7180 190 320 \
-            || echo "::warning::route smoke test Tbilisi-Kutaisi failed"
           cp /tmp/graph.stamp app/src/main/assets/graph.stamp
+
+      # Validate the actual bundled road graph on every run, including cache hits.
+      # Synthetic tests alone cannot detect a stale, truncated, or incompatible cached graph.
+      - name: Validate offline road graph (cached or freshly built)
+        run: |
+          test -s app/src/main/assets/graph.bin || { echo "Required graph.bin is missing"; exit 1; }
+          python tools/route_check.py app/src/main/assets/graph.bin 41.7151 44.8271 42.2679 42.7180 190 320
+
+      - name: Save road graph cache
+        if: steps.need.outputs.graph == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            app/src/main/assets/graph.bin
+            app/src/main/assets/graph.stamp
+          key: roadgraph-v3-${{ hashFiles('tools/build_graph.py') }}-${{ steps.mapcache.outputs.source_revision }}
 
       - name: Build relief tiles (hillshade + elevation readout)
         if: steps.need.outputs.relief == 'true'
         continue-on-error: true
         working-directory: tools
-        run: python build_relief.py ../app/src/main/assets/relief.mbtiles
+        run: |
+          python build_relief.py ../app/src/main/assets/relief.mbtiles
+          cp /tmp/relief.stamp ../app/src/main/assets/relief.stamp
+
+      # Run the synthetic contour regression test on every build. Do not hide test failures
+      # inside the optional dataset-build step below.
+      - name: Test contour generation
+        run: |
+          python -m pip install --quiet numpy pillow scipy contourpy shapely
+          python tools/test_contours.py
 
       # Contour lines for the "Высоты" map type, computed from the relief DEM. Optional: the APK builds without them.
       - name: Build contour lines (elevation map type)
@@ -162,7 +280,6 @@ jobs:
         continue-on-error: true
         run: |
           python -m pip install --quiet numpy pillow scipy contourpy shapely
-          python tools/test_contours.py
           python tools/build_contours.py app/src/main/assets/relief.mbtiles app/src/main/assets/contours.mbtiles
           ls -lh app/src/main/assets/contours.mbtiles
           cp /tmp/contours.stamp app/src/main/assets/contours.stamp
@@ -172,11 +289,18 @@ jobs:
       - name: Build satellite imagery from XYZ tiles
         if: env.SAT_TILES != 'none' && steps.need.outputs.sat == 'true'
         continue-on-error: true
+        timeout-minutes: 60
         run: |
           python -m pip install --quiet pillow
           DETAIL="$SAT_DETAIL"; [ "$DETAIL" = "none" ] && DETAIL=""
+          python - <<'PY'
+          import os
+          minimum, maximum = int(os.environ["SAT_MIN_ZOOM"]), int(os.environ["SAT_ZOOM"])
+          if minimum < 0 or maximum > 18 or minimum > maximum:
+              raise SystemExit("Satellite zoom must satisfy 0 <= min <= max <= 18")
+          PY
           # shellcheck disable=SC2086
-          python tools/build_satellite.py app/src/main/assets/map.mbtiles app/src/main/assets/sat.mbtiles "$SAT_TILES" "$SAT_ZOOM" 10 $DETAIL
+          python tools/build_satellite.py app/src/main/assets/map.mbtiles app/src/main/assets/sat.mbtiles "$SAT_TILES" "$SAT_ZOOM" "$SAT_MIN_ZOOM" $DETAIL
           ls -lh app/src/main/assets/sat.mbtiles
           cp /tmp/sat.stamp app/src/main/assets/sat.stamp
 
@@ -200,6 +324,7 @@ jobs:
           python tools/gen_style.py app/src/main/assets/style_sat_dark.json --sat --dark
           python tools/themes.py
           python tools/test_compass.py
+          python tools/test_satellite_style.py
           ls -l app/src/main/assets/style_*.json | wc -l
 
       # Optional real satellite imagery: a raster MBTiles (png/jpg tiles, XYZ) of your region from a source you may use
@@ -207,12 +332,67 @@ jobs:
         if: inputs.sat_url != ''
         continue-on-error: true
         run: |
-          curl -L --fail -o app/src/main/assets/sat.mbtiles "${{ inputs.sat_url }}"
-          ls -lh app/src/main/assets/sat.mbtiles
+          set -euo pipefail
+          python -m pip install --quiet pillow
+          target="app/src/main/assets/sat.mbtiles"
+          tmp="${target}.download"
+          trap 'rm -f "$tmp"' EXIT
+          rm -f "$tmp"
+          curl -L --fail --retry 3 --retry-all-errors -o "$tmp" "${{ inputs.sat_url }}"
+          python tools/validate_mbtiles.py "$tmp"
+          # Publish only a fully validated database; a failed download/validation leaves the
+          # previous working offline imagery untouched.
+          mv -f "$tmp" "$target"
+          ls -lh "$target"
+
+      - name: Fingerprint offline map data
+        run: |
+          : > app/src/main/assets/data.version
+          for name in map.mbtiles places.db relief.mbtiles graph.bin sat.mbtiles contours.mbtiles; do
+            file="app/src/main/assets/$name"
+            if [ -s "$file" ]; then
+              hash="$(sha256sum "$file" | cut -d' ' -f1)"
+              printf '%s=%s\n' "$name" "$hash" >> app/src/main/assets/data.version
+            fi
+          done
+          cat app/src/main/assets/data.version
 
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.10.2"
+
+      - name: Run Kotlin router unit tests
+        run: gradle --no-daemon :app:testDebugUnitTest
+
+      # Exercise SQLite migrations, atomic user-data writes, offline manifest permissions,
+      # and first-launch map-data extraction on a real Android runtime.
+      - name: Enable KVM group permissions
+        run: |
+          if [ -e /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+            ls -l /dev/kvm
+          else
+            echo "KVM device is unavailable; the emulator will use the TCG fallback."
+          fi
+
+      - name: Run Android emulator smoke tests
+        uses: reactivecircus/android-emulator-runner@v2
+        timeout-minutes: 30
+        env:
+          # Emulator 37.3+ requires this opt-in only when hardware acceleration is unavailable.
+          ANDROID_I_WANT_MY_TCG: yes
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          # Auto-detect KVM after the permissions step; fall back to TCG only if absent.
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: gradle --no-daemon :app:connectedDebugAndroidTest
 
       - name: Build Ok Map APK
         run: gradle --no-daemon -Pvcode=${{ github.run_number }} :app:assembleDebug
