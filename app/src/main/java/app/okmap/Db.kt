@@ -248,6 +248,51 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 3) {
         return out
     }
 
+    /** Return a bounded geometry sample for each GPX segment without joining disconnected segments. */
+    fun trackLatLngSegments(id: Long, maxPoints: Int = 8000): List<List<LatLng>> {
+        val db = readableDatabase
+        val total = db.rawQuery("select count(*) from track_points where track_id=?", arrayOf(id.toString()))
+            .use { if (it.moveToFirst()) it.getInt(0) else 0 }
+        if (total == 0) return emptyList()
+        val limit = maxPoints.coerceAtLeast(2)
+        val step = ((total + limit - 1) / limit).coerceAtLeast(1)
+        val result = ArrayList<List<LatLng>>()
+        var currentSegment: Int? = null
+        var segmentPointIndex = 0
+        var selected = ArrayList<LatLng>()
+        var lastPoint: LatLng? = null
+
+        fun finishSegment() {
+            val last = lastPoint
+            if (last != null && (selected.isEmpty() || selected.last().latitude != last.latitude || selected.last().longitude != last.longitude)) {
+                selected.add(last)
+            }
+            if (selected.size >= 2) result.add(selected)
+            selected = ArrayList()
+            segmentPointIndex = 0
+            lastPoint = null
+        }
+
+        db.rawQuery(
+            "select lat,lon,segment from track_points where track_id=? order by id",
+            arrayOf(id.toString())
+        ).use { c ->
+            while (c.moveToNext()) {
+                val segment = c.getInt(2)
+                if (currentSegment != segment) {
+                    if (currentSegment != null) finishSegment()
+                    currentSegment = segment
+                }
+                val point = LatLng(c.getDouble(0), c.getDouble(1))
+                if (segmentPointIndex == 0 || segmentPointIndex % step == 0) selected.add(point)
+                lastPoint = point
+                segmentPointIndex++
+            }
+        }
+        if (currentSegment != null) finishSegment()
+        return result
+    }
+
     fun deleteTrack(id: Long) {
         val db = writableDatabase
         db.delete("track_points", "track_id=?", arrayOf(id.toString()))
