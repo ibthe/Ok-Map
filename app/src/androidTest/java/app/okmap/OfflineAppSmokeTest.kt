@@ -104,26 +104,34 @@ class OfflineAppSmokeTest {
         assertTrue("Offline road graph is missing", assets.contains("graph.bin"))
         assertTrue("Offline places index is missing", assets.contains("places.db"))
 
-        // MapLibre must be initialized before XML inflation constructs its MapView.
-        MapLibre.getInstance(context)
-        val root = LayoutInflater.from(context).inflate(R.layout.activity_main, null, false)
-        val ids = listOf(
-            R.id.mapView, R.id.etSearch, R.id.btnMenu, R.id.btnPoint,
-            R.id.btnLocation, R.id.btnCompass, R.id.btnRec, R.id.dock, R.id.rightControls
-        )
-        ids.forEach { id -> assertTrue("Missing layout view id $id", root.findViewById<View>(id) != null) }
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            try {
+                // MapLibre and Android View construction/measurement must stay on the UI thread.
+                MapLibre.getInstance(context)
+                val root = LayoutInflater.from(context).inflate(R.layout.activity_main, null, false)
+                val ids = listOf(
+                    R.id.mapView, R.id.etSearch, R.id.btnMenu, R.id.btnPoint,
+                    R.id.btnLocation, R.id.btnCompass, R.id.btnRec, R.id.dock, R.id.rightControls
+                )
+                ids.forEach { id -> assertTrue("Missing layout view id $id", root.findViewById<View>(id) != null) }
 
-        val width = context.resources.displayMetrics.widthPixels
-        val height = context.resources.displayMetrics.heightPixels
-        root.measure(
-            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
-        )
-        root.layout(0, 0, width, height)
-        val dockView = root.findViewById<View>(R.id.dock)
-        val rightView = root.findViewById<View>(R.id.rightControls)
-        val dock = Rect(dockView.left, dockView.top, dockView.right, dockView.bottom)
-        val right = Rect(rightView.left, rightView.top, rightView.right, rightView.bottom)
-        assertFalse("Bottom dock and right-side controls must not overlap", Rect.intersects(dock, right))
+                val width = context.resources.displayMetrics.widthPixels
+                val height = context.resources.displayMetrics.heightPixels
+                root.measure(
+                    View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
+                )
+                root.layout(0, 0, width, height)
+                val dockView = root.findViewById<View>(R.id.dock)
+                val rightView = root.findViewById<View>(R.id.rightControls)
+                val dock = Rect(dockView.left, dockView.top, dockView.right, dockView.bottom)
+                val right = Rect(rightView.left, rightView.top, rightView.right, rightView.bottom)
+                assertFalse("Bottom dock and right-side controls must not overlap", Rect.intersects(dock, right))
+            } catch (t: Throwable) {
+                failure.set(t)
+            }
+        }
+        failure.get()?.let { throw AssertionError("Activity layout smoke test failed", it) }
     }
 }
