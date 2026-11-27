@@ -1689,17 +1689,79 @@ class MainActivity : AppCompatActivity() {
         MaterialAlertDialogBuilder(this).setTitle("Мои треки").setItems(items) { _, i ->
             val t = list[i]
             MaterialAlertDialogBuilder(this).setTitle(t.name)
-                .setItems(arrayOf("Показать на карте", "Скрыть", "Удалить")) { _, a ->
+                .setItems(arrayOf("Показать на карте", "Профиль высот", "Скрыть", "Удалить")) { _, a ->
                     when (a) {
                         0 -> { shownTrackId = t.id; refreshTrack(); fitTrack(t.id) }
-                        1 -> { shownTrackId = -1L; refreshTrack() }
-                        2 -> {
+                        1 -> showTrackElevationProfile(t.id)
+                        2 -> { shownTrackId = -1L; refreshTrack() }
+                        3 -> {
                             if (TrackService.running && prefs.getLong("rec_track", 0L) == t.id) toast("Сначала остановите запись")
                             else { userDb.deleteTrack(t.id); if (shownTrackId == t.id) shownTrackId = -1L; refreshTrack() }
                         }
                     }
                 }.show()
         }.show()
+    }
+
+    private fun showTrackElevationProfile(id: Long) {
+        val points = userDb.trackPoints(id)
+        if (points.size < 2) { toast("В треке недостаточно точек"); return }
+        val trackName = userDb.tracks().firstOrNull { it.id == id }?.name ?: "Трек"
+        toast("Строю профиль высот…")
+        thread(name = "track-elevation-profile") {
+            val coordinates = points.map { LatLng(it.lat, it.lon) }
+            val distances = DoubleArray(points.size)
+            for (i in 1 until points.size) {
+                distances[i] = distances[i - 1] + coordinates[i - 1].distanceTo(coordinates[i])
+            }
+            val maxSamples = 300
+            val indexes = if (points.size <= maxSamples) points.indices.toList()
+                else (0 until maxSamples).map { it * (points.size - 1) / (maxSamples - 1) }.distinct()
+            val samples = ArrayList<ElevationSample>(indexes.size)
+            for (index in indexes) {
+                val p = points[index]
+                val altitude = if (p.ele.isFinite()) p.ele else
+                    runCatching { elevation?.at(p.lat, p.lon)?.toDouble() }.getOrNull()
+                if (altitude != null && altitude.isFinite()) samples.add(ElevationSample(distances[index], altitude))
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                val summary = ElevationProfile.summarize(samples)
+                if (summary == null) {
+                    toast("Нет данных высоты для этого трека")
+                    return@runOnUiThread
+                }
+                val root = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(18), dp(8), dp(18), dp(24))
+                }
+                root.addView(dragHandle())
+                root.addView(label("Профиль высот", 22f, R.attr.gTextPrimary, true).apply {
+                    setPadding(dp(4), dp(4), 0, dp(8))
+                })
+                root.addView(label(trackName, 14f, R.attr.gTextSecondary).apply {
+                    setPadding(dp(4), 0, 0, dp(8))
+                })
+                val stats = "Длина ${Geo.fmtDist(summary.distanceMeters)} · подъём +${summary.ascentMeters.roundToInt()} м · спуск −${summary.descentMeters.roundToInt()} м\n" +
+                    "Высота: ${summary.minElevationMeters.roundToInt()}–${summary.maxElevationMeters.roundToInt()} м"
+                root.addView(label(stats, 13f, R.attr.gHint).apply {
+                    setPadding(dp(4), 0, 0, dp(8))
+                })
+                root.addView(
+                    ElevationProfileView(
+                        this, samples, themeColor(R.attr.gAccent),
+                        themeColor(R.attr.gTextSecondary), themeColor(R.attr.gStroke)
+                    ),
+                    LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(220))
+                )
+                val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+                sheet.setContentView(root)
+                styleSheet(sheet)
+                sheet.behavior.skipCollapsed = true
+                sheet.setOnShowListener { sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED }
+                sheet.show()
+            }
+        }
     }
 
     private fun fitTrack(id: Long) {

@@ -143,9 +143,10 @@ class PlaceDb(path: String) {
 /** Reads ground elevation from the Terrarium tiles bundled in relief.mbtiles. */
 class Elevation(path: String, private val z: Int = 11) {
     private val db = SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.OPEN_READONLY)
-    private var cacheKey = ""
-    private var cacheBmp: Bitmap? = null
+    // Small LRU cache avoids decoding the same DEM tiles repeatedly while drawing a profile.
+    private val tileCache = LinkedHashMap<String, Bitmap>(8, 0.75f, true)
 
+    @Synchronized
     fun at(lat: Double, lon: Double): Int? {
         if (lat < -85 || lat > 85) return null
         val n = 1 shl z
@@ -156,7 +157,7 @@ class Elevation(path: String, private val z: Int = 11) {
         val y = floor(yf).toInt()
         if (x < 0 || y < 0 || x >= n || y >= n) return null
         val key = "$x/$y"
-        var bmp: Bitmap? = if (key == cacheKey) cacheBmp else null
+        var bmp = tileCache[key]
         if (bmp == null) {
             val row = n - 1 - y
             var blob: ByteArray? = null
@@ -165,11 +166,18 @@ class Elevation(path: String, private val z: Int = 11) {
                 arrayOf(z.toString(), x.toString(), row.toString())
             ).use { c -> if (c.moveToFirst()) blob = c.getBlob(0) }
             val b = blob ?: return null
-            bmp = BitmapFactory.decodeByteArray(b, 0, b.size)
-            cacheKey = key
-            cacheBmp = bmp
+            bmp = BitmapFactory.decodeByteArray(b, 0, b.size) ?: return null
+            tileCache[key] = bmp
+            if (tileCache.size > 8) {
+                val oldest = tileCache.entries.iterator()
+                if (oldest.hasNext()) {
+                    val entry = oldest.next()
+                    oldest.remove()
+                    if (!entry.value.isRecycled) entry.value.recycle()
+                }
+            }
         }
-        val bm = bmp ?: return null
+        val bm = bmp
         val px = ((xf - x) * bm.width).toInt().coerceIn(0, bm.width - 1)
         val py = ((yf - y) * bm.height).toInt().coerceIn(0, bm.height - 1)
         val p = bm.getPixel(px, py)
@@ -179,10 +187,10 @@ class Elevation(path: String, private val z: Int = 11) {
         return Math.round((rr * 256 + gg + bb / 256.0) - 32768.0).toInt()
     }
 
+    @Synchronized
     fun close() {
         db.close()
-        cacheBmp?.recycle()
-        cacheBmp = null
-        cacheKey = ""
+        tileCache.values.forEach { if (!it.isRecycled) it.recycle() }
+        tileCache.clear()
     }
 }
