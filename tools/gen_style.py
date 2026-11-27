@@ -353,9 +353,10 @@ if SAT:
             l["paint"] = {"hillshade-exaggeration": zi((5, 0.62), (9, 0.52), (12, 0.34), (14, 0.22), base=1),
                           "hillshade-illumination-direction": 315, "hillshade-shadow-color": "#000000",
                           "hillshade-highlight-color": "#ffffff", "hillshade-accent-color": "#1c261c"}
-    # real imagery (optional sat.mbtiles, raster): drawn right above the background; the app hides the flat
-    # land / water fills when the file exists, and removes this layer when it does not
-    L.insert(1, {"id": "sat-imagery", "type": "raster", "source": "sat", "paint": {"raster-fade-duration": 0}})
+    # Draw real imagery above the base fills but below roads and labels. When a raster tile is
+    # missing (outside coverage or at an unavailable zoom), the offline vector map remains visible.
+    last_fill = max((i for i, layer in enumerate(L) if layer["type"] in ("background", "fill")), default=0)
+    L.insert(last_fill + 1, {"id": "sat-imagery", "type": "raster", "source": "sat", "paint": {"raster-fade-duration": 0}})
 
 style = {
     "version": 8,

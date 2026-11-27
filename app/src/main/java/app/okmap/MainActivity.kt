@@ -472,9 +472,6 @@ class MainActivity : AppCompatActivity() {
             if (id == "relief-hillshade" && !relief.exists()) continue
             if (id == "sat-imagery" && !hasImagery) continue
             if (id == "sat-imagery") l.put("minzoom", imageryMinZoom)
-            // with real imagery the flat land / water fills would cover it: they stay only below the imagery's first zoom
-            if (hasImagery && (l.optString("type") == "fill" || l.optString("type") == "background"))
-                l.put("maxzoom", minOf(l.optDouble("maxzoom", 24.0), imageryMinZoom.toDouble()))
             dst.put(l)
         }
         if (topo) addElevationMode(obj, dst)

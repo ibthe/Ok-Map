@@ -230,6 +230,7 @@ jobs:
           python tools/gen_style.py app/src/main/assets/style_sat_dark.json --sat --dark
           python tools/themes.py
           python tools/test_compass.py
+          python tools/test_satellite_style.py
           ls -l app/src/main/assets/style_*.json | wc -l
 
       # Optional real satellite imagery: a raster MBTiles (png/jpg tiles, XYZ) of your region from a source you may use
