@@ -65,12 +65,16 @@ jobs:
       - name: Calculate map-data cache key
         id: mapcache
         shell: bash
+        env:
+          OSM_URL: ${{ inputs.osm_url || '' }}
+          MAP_DATA_REVISION: ${{ inputs.map_data_revision || 'default' }}
         run: |
           HASH=$(
             cat tools/fetch_osm.py tools/finalize_tiles.py tools/check_tiles.py tools/mvt.py tools/build_relief.py |
               sha256sum | cut -d' ' -f1
           )
-          echo "key=mapdata-v4-${HASH}" >> "$GITHUB_OUTPUT"
+          REV=$(printf '%s|%s' "$OSM_URL" "$MAP_DATA_REVISION" | sha256sum | cut -d' ' -f1)
+          echo "key=mapdata-v4-${HASH}-${REV}" >> "$GITHUB_OUTPUT"
 
       # Map data (tiles, search index, relief) is rebuilt only when the tile tools change.
       # Fonts and the style are NOT part of this cache: they are cheap and are rebuilt on every run.
