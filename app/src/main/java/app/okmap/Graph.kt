@@ -400,11 +400,11 @@ class Graph(file: File) {
     // ------------------------------------------------------------------ routing (A*)
     private class Heap {
         var keys = DoubleArray(1024)
-        var vals = IntArray(1024)
+        var vals = LongArray(1024)
         var size = 0
         var topKey = 0.0
 
-        fun push(k: Double, v: Int) {
+        fun push(k: Double, v: Long) {
             if (size == keys.size) {
                 keys = keys.copyOf(size * 2)
                 vals = vals.copyOf(size * 2)
@@ -421,8 +421,7 @@ class Graph(file: File) {
             vals[i] = v
         }
 
-        /** removes the smallest entry; its key is left in [topKey] */
-        fun pop(): Int {
+        fun pop(): Long {
             val res = vals[0]
             topKey = keys[0]
             size--
@@ -453,13 +452,16 @@ class Graph(file: File) {
     /** Fastest route using directed-arc states; the incoming road is retained at every junction. */
     fun route(s: Snap, e: Snap, avoidUnpaved: Boolean): List<Leg>? {
         val inf = Double.MAX_VALUE
-        val stateCount = segments * 2
-        val g = DoubleArray(stateCount) { inf }
-        val prev = IntArray(stateCount) { -1 }
-        val closed = BooleanArray(stateCount)
         val heap = Heap()
+        val g = HashMap<Long, Double>()
+        val prev = HashMap<Long, Long>()
+        val closed = HashSet<Long>()
         val vmax = maxKmh / 3.6
         fun h(node: Int) = haversine(nLat(node), nLon(node), e.lat, e.lon) / vmax
+        fun key(arc: Int, automaton: Int) =
+            (arc.toLong() shl 32) or (automaton.toLong() and 0xffffffffL)
+        fun arcOf(state: Long) = (state ushr 32).toInt()
+        fun automatonOf(state: Long) = state.toInt()
         val ks = s.seg
         val ke = e.seg
         val ls = segLen(ks)
@@ -469,36 +471,45 @@ class Graph(file: File) {
             if (e.off < s.off && canBackward(ks)) return listOf(Leg(ks, s.off, e.off, -1))
         }
         fun arcEnd(arc: Int): Int = if ((arc and 1) == 0) segB(arc / 2) else segA(arc / 2)
-        if (canBackward(ks)) {
-            val state = 2 * ks + 1
-            val node = segA(ks)
-            g[state] = cost(ks, s.off, avoidUnpaved)
-            heap.push(g[state] + h(node), state)
+
+        fun addStart(arc: Int, node: Int, partialCost: Double) {
+            val ac = restrictionAutomaton.next(0, arc)
+            if (restrictionAutomaton.isForbidden(ac)) return
+            val state = key(arc, ac)
+            if (partialCost < (g[state] ?: inf)) {
+                g[state] = partialCost
+                heap.push(partialCost + h(node), state)
+            }
         }
-        if (canForward(ks)) {
-            val state = 2 * ks
-            val node = segB(ks)
-            val c0 = cost(ks, ls - s.off, avoidUnpaved)
-            if (c0 < g[state]) { g[state] = c0; heap.push(c0 + h(node), state) }
-        }
+        if (canBackward(ks)) addStart(2 * ks + 1, segA(ks), cost(ks, s.off, avoidUnpaved))
+        if (canForward(ks)) addStart(2 * ks, segB(ks), cost(ks, ls - s.off, avoidUnpaved))
+
         var best = inf
-        var bestState = -1
+        var bestState = -1L
         var bestEndArc = -1
         while (heap.size > 0) {
             val state = heap.pop()
             if (heap.topKey >= best) break
-            if (closed[state]) continue
-            closed[state] = true
-            val node = arcEnd(state)
+            if (!closed.add(state)) continue
+            val inArc = arcOf(state)
+            val acState = automatonOf(state)
+            val node = arcEnd(inArc)
+            val currentCost = g[state] ?: continue
             if (node == segA(ke) && canForward(ke)) {
                 val endArc = 2 * ke
                 val tail = cost(ke, e.off, avoidUnpaved)
-                if (!forbiddenTurn(state, endArc) && g[state] + tail < best) { best = g[state] + tail; bestState = state; bestEndArc = endArc }
+                if (!forbiddenTurn(inArc, endArc) && !restrictionAutomaton.blocks(acState, endArc) &&
+                    currentCost + tail < best) {
+                    best = currentCost + tail; bestState = state; bestEndArc = endArc
+                }
             }
             if (node == segB(ke) && canBackward(ke)) {
                 val endArc = 2 * ke + 1
                 val tail = cost(ke, le - e.off, avoidUnpaved)
-                if (!forbiddenTurn(state, endArc) && g[state] + tail < best) { best = g[state] + tail; bestState = state; bestEndArc = endArc }
+                if (!forbiddenTurn(inArc, endArc) && !restrictionAutomaton.blocks(acState, endArc) &&
+                    currentCost + tail < best) {
+                    best = currentCost + tail; bestState = state; bestEndArc = endArc
+                }
             }
             for (i in adjStart(node) until adjStart(node + 1)) {
                 val k = adj(i)
@@ -507,19 +518,26 @@ class Graph(file: File) {
                 if (segA(k) == node && canForward(k)) { outArc = 2 * k; next = segB(k) }
                 else if (segB(k) == node && canBackward(k)) { outArc = 2 * k + 1; next = segA(k) }
                 else continue
-                if (forbiddenTurn(state, outArc) || closed[outArc]) continue
-                val candidate = g[state] + cost(k, segLen(k), avoidUnpaved)
-                if (candidate < g[outArc]) {
-                    g[outArc] = candidate
-                    prev[outArc] = state
-                    heap.push(candidate + h(next), outArc)
+                if (forbiddenTurn(inArc, outArc) || restrictionAutomaton.blocks(acState, outArc)) continue
+                val nextAc = restrictionAutomaton.next(acState, outArc)
+                if (restrictionAutomaton.isForbidden(nextAc)) continue
+                val nextState = key(outArc, nextAc)
+                if (nextState in closed) continue
+                val candidate = currentCost + cost(k, segLen(k), avoidUnpaved)
+                if (candidate < (g[nextState] ?: inf)) {
+                    g[nextState] = candidate
+                    prev[nextState] = state
+                    heap.push(candidate + h(next), nextState)
                 }
             }
         }
-        if (bestState < 0) return null
+        if (bestState < 0L) return null
         val states = ArrayList<Int>()
         var state = bestState
-        while (state >= 0) { states.add(state); state = prev[state] }
+        while (state >= 0L) {
+            states.add(arcOf(state))
+            state = prev[state] ?: -1L
+        }
         states.reverse()
         val legs = ArrayList<Leg>()
         val firstArc = states[0]
