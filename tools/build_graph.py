@@ -328,8 +328,8 @@ def build(ways, min_component=40, cell=5000, restrictions=(), via_way_restrictio
         starts = []
         for arc in arcs_by_way.get(from_way, ()):
             node = arc_end[arc]
-                if any(arc_way.get(a) == via_ways[0] for a in outgoing_osm.get(node, ())):
-                    starts.append((arc, node))
+            if any(arc_way.get(a) == via_ways[0] for a in outgoing_osm.get(node, ())):
+                starts.append((arc, node))
         for from_arc, node in starts:
             resolved.clear()
             ambiguous = False
