@@ -466,8 +466,16 @@ class Graph(file: File) {
         turnRestrictions.contains((inArc.toLong() shl 32) or (outArc.toLong() and 0xffffffffL))
 
     /** Fastest route using directed-arc states; the incoming road is retained at every junction. */
-    fun route(s: Snap, e: Snap, avoidUnpaved: Boolean): List<Leg>? {
+    fun route(
+        s: Snap, e: Snap, avoidUnpaved: Boolean,
+        penalizedArcs: Set<Int> = emptySet(), penaltyFactor: Double = 1.0
+    ): List<Leg>? {
         val inf = Double.MAX_VALUE
+        val penaltyMultiplier = if (penaltyFactor.isFinite()) max(1.0, penaltyFactor) else 1.0
+        fun adjustedCost(segment: Int, meters: Double, arc: Int): Double {
+            val base = cost(segment, meters, avoidUnpaved)
+            return if (arc in penalizedArcs) base * penaltyMultiplier else base
+        }
         val heap = Heap()
         val g = HashMap<Long, Double>()
         val prev = HashMap<Long, Long>()
@@ -505,14 +513,14 @@ class Graph(file: File) {
             for (i in adjStart(startNode) until adjStart(startNode + 1)) {
                 val k = adj(i)
                 if (segA(k) == startNode && canForward(k)) {
-                    addStart(2 * k, segB(k), cost(k, segLen(k), avoidUnpaved))
+                    addStart(2 * k, segB(k), adjustedCost(k, segLen(k), 2 * k))
                 } else if (segB(k) == startNode && canBackward(k)) {
-                    addStart(2 * k + 1, segA(k), cost(k, segLen(k), avoidUnpaved))
+                    addStart(2 * k + 1, segA(k), adjustedCost(k, segLen(k), 2 * k + 1))
                 }
             }
         } else {
-            if (canBackward(ks)) addStart(2 * ks + 1, segA(ks), cost(ks, s.off, avoidUnpaved))
-            if (canForward(ks)) addStart(2 * ks, segB(ks), cost(ks, ls - s.off, avoidUnpaved))
+            if (canBackward(ks)) addStart(2 * ks + 1, segA(ks), adjustedCost(ks, s.off, 2 * ks + 1))
+            if (canForward(ks)) addStart(2 * ks, segB(ks), adjustedCost(ks, ls - s.off, 2 * ks))
         }
 
         var best = inf
@@ -523,11 +531,11 @@ class Graph(file: File) {
         // may be faster than an avoided unpaved segment.
         if (ks == ke) {
             if (e.off >= s.off && canForward(ks)) {
-                best = cost(ks, e.off - s.off, avoidUnpaved)
+                best = adjustedCost(ks, e.off - s.off, 2 * ks)
                 directStartLeg = Leg(ks, s.off, e.off, -1)
             }
             if (e.off < s.off && canBackward(ks)) {
-                val direct = cost(ks, s.off - e.off, avoidUnpaved)
+                val direct = adjustedCost(ks, s.off - e.off, 2 * ks + 1)
                 if (direct < best) {
                     best = direct
                     directStartLeg = Leg(ks, s.off, e.off, -1)
@@ -535,14 +543,14 @@ class Graph(file: File) {
             }
         }
         if (startAtNode && startNode == segA(ke) && canForward(ke)) {
-            val direct = cost(ke, e.off, avoidUnpaved)
+            val direct = adjustedCost(ke, e.off, 2 * ke)
             if (direct < best) {
                 best = direct
                 directStartLeg = Leg(ke, 0.0, e.off, -1)
             }
         }
         if (startAtNode && startNode == segB(ke) && canBackward(ke)) {
-            val direct = cost(ke, le - e.off, avoidUnpaved)
+            val direct = adjustedCost(ke, le - e.off, 2 * ke + 1)
             if (direct < best) {
                 best = direct
                 directStartLeg = Leg(ke, le, e.off, -1)
@@ -558,7 +566,7 @@ class Graph(file: File) {
             val currentCost = g[state] ?: continue
             if (node == segA(ke) && canForward(ke)) {
                 val endArc = 2 * ke
-                val tail = cost(ke, e.off, avoidUnpaved)
+                val tail = adjustedCost(ke, e.off, endArc)
                 if (!forbiddenTurn(inArc, endArc) && !restrictionAutomaton.blocks(acState, endArc) &&
                     currentCost + tail < best) {
                     best = currentCost + tail; bestState = state; bestEndArc = endArc
@@ -566,7 +574,7 @@ class Graph(file: File) {
             }
             if (node == segB(ke) && canBackward(ke)) {
                 val endArc = 2 * ke + 1
-                val tail = cost(ke, le - e.off, avoidUnpaved)
+                val tail = adjustedCost(ke, le - e.off, endArc)
                 if (!forbiddenTurn(inArc, endArc) && !restrictionAutomaton.blocks(acState, endArc) &&
                     currentCost + tail < best) {
                     best = currentCost + tail; bestState = state; bestEndArc = endArc
@@ -584,7 +592,7 @@ class Graph(file: File) {
                 if (restrictionAutomaton.isForbidden(nextAc)) continue
                 val nextState = key(outArc, nextAc)
                 if (nextState in closed) continue
-                val candidate = currentCost + cost(k, segLen(k), avoidUnpaved)
+                val candidate = currentCost + adjustedCost(k, segLen(k), outArc)
                 if (candidate < (g[nextState] ?: inf)) {
                     g[nextState] = candidate
                     prev[nextState] = state
@@ -620,6 +628,31 @@ class Graph(file: File) {
         legs.add(if ((bestEndArc and 1) == 0) Leg(ke, 0.0, e.off, -1) else Leg(ke, le, e.off, -1))
         return legs
     }
+
+    /**
+     * Find a meaningfully different second route by penalizing every directed arc
+     * used by the primary route. Return it only when the real travel cost stays reasonable.
+     */
+    fun routeAlternative(s: Snap, e: Snap, avoidUnpaved: Boolean, primary: List<Leg>): List<Leg>? {
+        val primaryArcs = primary.mapTo(HashSet()) {
+            2 * it.seg + if (it.to < it.from) 1 else 0
+        }
+        if (primaryArcs.isEmpty()) return null
+        val alternative = route(s, e, avoidUnpaved, primaryArcs, 3.0) ?: return null
+        val alternativeArcs = alternative.mapTo(HashSet()) {
+            2 * it.seg + if (it.to < it.from) 1 else 0
+        }
+        if (alternativeArcs == primaryArcs) return null
+        val union = primaryArcs + alternativeArcs
+        val overlap = primaryArcs.intersect(alternativeArcs).size.toDouble() / union.size.coerceAtLeast(1)
+        if (overlap > 0.90) return null
+        fun realCost(path: List<Leg>) = path.sumOf { cost(it.seg, abs(it.to - it.from), avoidUnpaved) }
+        val primaryCost = realCost(primary)
+        val alternativeCost = realCost(alternative)
+        if (primaryCost <= 0.0 || alternativeCost > primaryCost * 1.8) return null
+        return alternative
+    }
+
     // ------------------------------------------------------------------ route geometry + instructions
     private class DList {
         var a = DoubleArray(256)

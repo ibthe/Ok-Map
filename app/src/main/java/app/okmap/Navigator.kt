@@ -145,6 +145,7 @@ class Navigator(
         if (!silent) toast("Строю маршрут…")
         thread(name = "route") {
             var result: Route? = null
+            var alternative: Route? = null
             var error: String? = null
             var sd = 0.0
             var ed = 0.0
@@ -159,7 +160,13 @@ class Navigator(
                     sd = s.dist; ed = e.dist
                     val legs = g.route(s, e, avoid)
                     if (legs == null) error = "Маршрут не найден: дороги в этих местах не связаны"
-                    else result = g.buildRoute(legs, avoid)
+                    else {
+                        result = g.buildRoute(legs, avoid)
+                        if (!silent) {
+                            val alternativeLegs = g.routeAlternative(s, e, avoid, legs)
+                            if (alternativeLegs != null) alternative = g.buildRoute(alternativeLegs, avoid)
+                        }
+                    }
                 }
             } catch (ex: Exception) {
                 error = "Ошибка маршрута: ${ex.message}"
@@ -172,25 +179,42 @@ class Navigator(
                 if (silent && !navigating) return@runOnUiThread        // navigation was ended while rerouting
                 val r = result
                 if (error != null || r == null) { toast(error ?: "Маршрут не найден"); return@runOnUiThread }
-                val accept = {
+                val accept: (Route) -> Unit = { selected ->
                     destLat = lat; destLon = lon; destTitle = title
                     this.fromLat = fromLat; this.fromLon = fromLon
                     connStart = sd; connEnd = ed
-                    applyRoute(r, silent)
+                    applyRoute(selected, silent)
                 }
                 when {
-                    silent -> accept()
+                    silent -> accept(r)
                     sd > 200_000.0 -> farFromMap(sd, lat, lon, title)
                     maxOf(sd, ed) > 30_000.0 -> MaterialAlertDialogBuilder(act)
                         .setTitle("Дорога далеко")
                         .setMessage(("Ближайшая дорога: ${if (sd > 30_000.0) "к месту старта" else "к точке назначения"} " +
                             "в ${Geo.fmtDist(maxOf(sd, ed))}. Построить маршрут до неё и дальше по прямой?"))
-                        .setPositiveButton("Построить") { _, _ -> accept() }
+                        .setPositiveButton("Построить") { _, _ -> accept(r) }
                         .setNegativeButton("Отмена", null).show()
-                    else -> accept()
+                    else -> {
+                        val alt = alternative
+                        if (alt != null) chooseRoute(r, alt, accept) else accept(r)
+                    }
                 }
             }
         }
+    }
+
+    private fun chooseRoute(primary: Route, alternative: Route, onSelected: (Route) -> Unit) {
+        fun label(title: String, route: Route): String {
+            val minutes = ((route.seconds / 60.0) + 0.5).toInt().coerceAtLeast(1)
+            return "$title · ${Geo.fmtDist(route.distance)} · $minutes мин"
+        }
+        MaterialAlertDialogBuilder(act)
+            .setTitle("Выберите маршрут")
+            .setItems(arrayOf(label("Основной", primary), label("Альтернативный", alternative))) { _, index ->
+                onSelected(if (index == 0) primary else alternative)
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
     }
 
     /** The user is far outside the map (e.g. testing at home): offer the crosshair as an explicit start. */

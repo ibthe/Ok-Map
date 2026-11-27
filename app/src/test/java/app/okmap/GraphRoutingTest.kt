@@ -43,7 +43,7 @@ class GraphRoutingTest {
         intArrayOf(trackDm, paved1Dm, paved2Dm).forEach { bytes.putInt(it) }
         intArrayOf(-1, -1, -1).forEach { bytes.putInt(it) }   // no street names
         intArrayOf(0, 0, 0).forEach { bytes.putInt(it) }      // shape starts
-        byteArrayOf(50, 30, 30, 0).forEach { bytes.put(it) }  // km/h, padded
+        byteArrayOf(30, 50, 50, 0).forEach { bytes.put(it) }  // km/h, padded
         byteArrayOf(171.toByte(), 31, 31, 0).forEach { bytes.put(it) } // track + two paved roads, padded
         repeat(3) { bytes.putShort(0) }
         bytes.putShort(0)                                    // padded shape counts
@@ -57,6 +57,24 @@ class GraphRoutingTest {
         file.deleteOnExit()
         file.writeBytes(bytes.array())
         return file to trackDm / 10.0
+    }
+
+    @Test
+    fun routeAlternativeFindsAReasonableDistinctPavedPath() {
+        val (file, trackLength) = syntheticGraph()
+        val graph = Graph(file)
+        val start = Snap(0, 0.0, 0.0, 41.7000, 44.8000)
+        val end = Snap(0, trackLength, 0.0, 41.7000, 44.8100)
+
+        val primary = graph.route(start, end, avoidUnpaved = false)
+        assertNotNull(primary)
+        assertTrue(primary!!.any { it.seg == 0 })
+
+        val alternative = graph.routeAlternative(start, end, avoidUnpaved = false, primary = primary)
+        assertNotNull("a distinct reasonable paved alternative should be found", alternative)
+        assertTrue(alternative!!.any { it.seg == 1 })
+        assertTrue(alternative.any { it.seg == 2 })
+        assertTrue(alternative.none { it.seg == 0 && abs(it.to - it.from) > 1.0 })
     }
 
     @Test
