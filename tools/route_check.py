@@ -50,7 +50,7 @@ class Graph:
                 raise ValueError("missing turn-restriction section")
             count = struct.unpack_from("<i", raw, pos[0])[0]
             pos[0] += 4
-            if count < 0 or pos[0] + count * 8 != len(raw):
+            if count < 0 or pos[0] + count * 8 > len(raw):
                 raise ValueError("invalid turn-restriction section size")
             pairs = np.frombuffer(raw, dtype="<i4", count=count * 2, offset=pos[0]).reshape((-1, 2))
             if pairs.size and (np.any(pairs < 0) or np.any(pairs >= self.S * 2)):
