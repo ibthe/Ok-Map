@@ -21,7 +21,7 @@ import sys
 import numpy as np
 
 MAGIC = 0x3247_4B4F  # "OKG2"
-VERSION = 2
+VERSION = 3
 
 # class id (stored in flags bits 2..5), default speed km/h
 CLASSES = {
@@ -135,12 +135,13 @@ def way_name(tags):
     return n or ref
 
 
-def build(ways, min_component=40, cell=5000, restrictions=()):
+def build(ways, min_component=40, cell=5000, restrictions=(), via_way_restrictions=()):
     """Build graph; ways may be (tags,nodes) or (tags,nodes,osm_way_id).
 
     restrictions contains (from_way_id, via_node_id, to_way_id, restriction_tag) via-node relations.
     """
     restrictions = list(restrictions)
+    via_way_restrictions = list(via_way_restrictions)
     restriction_via_nodes = {int(r[1]) for r in restrictions}
     use = {}
     kept = []
@@ -268,6 +269,90 @@ def build(ways, min_component=40, cell=5000, restrictions=()):
                 blocked.update((ia, oa) for oa in allowed)
     turn_restrictions = np.asarray(sorted(blocked), dtype="<i4").reshape((-1, 2)) if blocked else np.empty((0, 2), dtype="<i4")
 
+    # Resolve ordered via-way relations to exact directed-arc sequences. Ambiguous
+    # topology is ignored rather than producing a restriction broader than OSM intended.
+    outgoing_osm = {}
+    arc_way, arc_start, arc_end = {}, {}, {}
+    for k, item in enumerate(seg):
+        way_id, na, nb, flags = int(item[8]), int(item[9]), int(item[10]), int(item[7])
+        if way_id < 0:
+            continue
+        if flags & F_FWD:
+            arc = 2 * k
+            arc_way[arc], arc_start[arc], arc_end[arc] = way_id, na, nb
+            outgoing_osm.setdefault(na, []).append(arc)
+        if flags & F_BACK:
+            arc = 2 * k + 1
+            arc_way[arc], arc_start[arc], arc_end[arc] = way_id, nb, na
+            outgoing_osm.setdefault(nb, []).append(arc)
+
+    sequence_restrictions = []
+    for from_way, via_ways, to_way, kind in via_way_restrictions:
+        via_ways = tuple(int(v) for v in via_ways)
+        from_way, to_way = int(from_way), int(to_way)
+        if not via_ways or not kind.startswith(("no_", "only_")):
+            continue
+        resolved = []
+        ambiguous = False
+
+        def walk_way(node, idx, previous_arc, prefix, visited):
+            nonlocal ambiguous
+            if ambiguous:
+                return
+            next_way = via_ways[idx + 1] if idx + 1 < len(via_ways) else to_way
+            exits = [a for a in outgoing_osm.get(node, ()) if arc_way[a] == next_way]
+            if exits:
+                if idx + 1 == len(via_ways):
+                    for out_arc in exits:
+                        resolved.append((prefix, out_arc))
+                        if len(resolved) > 1:
+                            ambiguous = True
+                            return
+                else:
+                    for out_arc in exits:
+                        walk_way(node, idx + 1, previous_arc, prefix, visited)
+                        if ambiguous:
+                            return
+            for arc in outgoing_osm.get(node, ()):
+                if arc_way[arc] != via_ways[idx] or arc == (previous_arc ^ 1):
+                    continue
+                end_node = arc_end[arc]
+                if end_node in visited:
+                    continue
+                walk_way(end_node, idx, arc, prefix + [arc], visited | {end_node})
+                if ambiguous:
+                    return
+
+        starts = []
+        for arc, wid in arc_way.items():
+            if wid == from_way:
+                node = arc_end[arc]
+                if any(arc_way.get(a) == via_ways[0] for a in outgoing_osm.get(node, ())):
+                    starts.append((arc, node))
+        for from_arc, node in starts:
+            resolved.clear()
+            ambiguous = False
+            for via_arc in outgoing_osm.get(node, ()):
+                if arc_way[via_arc] != via_ways[0]:
+                    continue
+                walk_way(arc_end[via_arc], 0, via_arc, [via_arc], {node, arc_end[via_arc]})
+                if ambiguous:
+                    break
+            if ambiguous or len(resolved) != 1:
+                continue
+            via_prefix, to_arc = resolved[0]
+            prefix = [from_arc] + via_prefix
+            if kind.startswith("only_"):
+                sequence_restrictions.append((2, prefix, [to_arc]))
+            else:
+                sequence_restrictions.append((1, prefix + [to_arc], []))
+
+    # De-duplicate identical relation paths while preserving deterministic output.
+    unique_sequences = {}
+    for rtype, prefix, allowed in sequence_restrictions:
+        unique_sequences[(rtype, tuple(prefix), tuple(allowed))] = None
+    sequence_restrictions = [(t, list(p), list(a)) for t, p, a in unique_sequences]
+
     # adjacency (CSR): every segment is listed under both of its nodes
     deg = np.bincount(np.concatenate([A, B]), minlength=n).astype("<i4")
     adj_start = np.zeros(n + 1, dtype="<i4")
@@ -315,7 +400,7 @@ def build(ways, min_component=40, cell=5000, restrictions=()):
     return dict(nlat=nlat_a, nlon=nlon_a, adj_start=adj_start, adj=adj, A=A, B=B, LEN=LEN, NAME=NAME, SST=SST,
                 KMH=KMH, FLG=FLG, SCNT=SCNT, shp_lat=shp_lat_a, shp_lon=shp_lon_a, name_off=name_off,
                 name_bytes=b"".join(name_bytes), names=len(names), lat0=lat0, lon0=lon0, cell=cell, W=W, H=H,
-                cell_start=cell_start, cell_data=cell_data, turn_restrictions=turn_restrictions)
+                cell_start=cell_start, cell_data=cell_data, turn_restrictions=turn_restrictions,\n                sequence_restrictions=sequence_restrictions)
 
 
 def pad4(b):
@@ -341,7 +426,7 @@ def write(g, path):
         f.write(g["cell_data"].tobytes())
         turns = g.get("turn_restrictions", np.empty((0, 2), dtype="<i4"))
         f.write(struct.pack("<i", len(turns)))
-        f.write(turns.astype("<i4", copy=False).tobytes())
+        f.write(turns.astype("<i4", copy=False).tobytes())\n        seqs = g.get("sequence_restrictions", [])\n        f.write(struct.pack("<i", len(seqs)))\n        for rtype, prefix, allowed in seqs:\n            f.write(struct.pack("<iii", int(rtype), len(prefix), len(allowed)))\n            f.write(struct.pack("<" + "i" * (len(prefix) + len(allowed)), *(prefix + allowed)))
     print(f"graph: {N} nodes, {S} segments, {P} shape points, {g['names']} names, grid {g['W']}x{g['H']}")
 
 
@@ -393,7 +478,7 @@ def read_pbf(path):
     h.apply_file(path, locations=True)
     print("routable ways:", len(h.ways), "via-node restrictions:", len(h.restrictions),
           "via-way restrictions detected (not yet encoded):", len(h.via_way_restrictions))
-    return h.ways, h.restrictions
+    return h.ways, h.restrictions, h.via_way_restrictions
 
 
 if __name__ == "__main__":
