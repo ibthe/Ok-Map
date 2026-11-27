@@ -320,7 +320,7 @@ class Graph(file: File) {
         val cy = (Math.floor(lat * 1e6).toLong() - lat0) / cell
         val cx = (Math.floor(lon * 1e6).toLong() - lon0) / cell
         val k = cos(Math.toRadians(lat))
-        val cellMeters = cell * 1e-6 * 111320.0 * k
+        val cellMeters = cell * 1e-6 * 111320.0 * min(1.0, k)
         var best: Snap? = null
         for (r in 0 until 40) {
             for (y in (cy - r).toInt()..(cy + r).toInt()) {
@@ -562,7 +562,7 @@ class Graph(file: File) {
                 }
             }
         }
-        if (bestState < 0L) return null
+        if (bestState < 0L) return directStartLeg?.let { listOf(it) }
         val states = ArrayList<Int>()
         var state = bestState
         while (state >= 0L) {
