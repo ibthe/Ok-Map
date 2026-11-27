@@ -481,8 +481,27 @@ class Graph(file: File) {
                 heap.push(partialCost + h(node), state)
             }
         }
-        if (canBackward(ks)) addStart(2 * ks + 1, segA(ks), cost(ks, s.off, avoidUnpaved))
-        if (canForward(ks)) addStart(2 * ks, segB(ks), cost(ks, ls - s.off, avoidUnpaved))
+        val startAtNode = s.off <= 1.0 || ls - s.off <= 1.0
+        val startNode = when {
+            s.off <= 1.0 -> segA(ks)
+            ls - s.off <= 1.0 -> segB(ks)
+            else -> -1
+        }
+        if (startAtNode) {
+            // At a junction there is no incoming road. Seed every legal outgoing arc
+            // directly, otherwise a zero-length fake arrival can trigger a turn restriction.
+            for (i in adjStart(startNode) until adjStart(startNode + 1)) {
+                val k = adj(i)
+                if (segA(k) == startNode && canForward(k)) {
+                    addStart(2 * k, segB(k), cost(k, segLen(k), avoidUnpaved))
+                } else if (segB(k) == startNode && canBackward(k)) {
+                    addStart(2 * k + 1, segA(k), cost(k, segLen(k), avoidUnpaved))
+                }
+            }
+        } else {
+            if (canBackward(ks)) addStart(2 * ks + 1, segA(ks), cost(ks, s.off, avoidUnpaved))
+            if (canForward(ks)) addStart(2 * ks, segB(ks), cost(ks, ls - s.off, avoidUnpaved))
+        }
 
         var best = inf
         var bestState = -1L
@@ -541,7 +560,15 @@ class Graph(file: File) {
         states.reverse()
         val legs = ArrayList<Leg>()
         val firstArc = states[0]
-        legs.add(if ((firstArc and 1) == 0) Leg(ks, s.off, ls, segB(ks)) else Leg(ks, s.off, 0.0, segA(ks)))
+        if (startAtNode) {
+            val firstSeg = firstArc / 2
+            val firstLen = segLen(firstSeg)
+            legs.add(if ((firstArc and 1) == 0) Leg(firstSeg, 0.0, firstLen, segB(firstSeg))
+                     else Leg(firstSeg, firstLen, 0.0, segA(firstSeg)))
+        } else {
+            legs.add(if ((firstArc and 1) == 0) Leg(ks, s.off, ls, segB(ks))
+                     else Leg(ks, s.off, 0.0, segA(ks)))
+        }
         for (i in 1 until states.size) {
             val arc = states[i]
             val k = arc / 2
