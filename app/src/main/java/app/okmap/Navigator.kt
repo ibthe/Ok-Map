@@ -280,7 +280,7 @@ class Navigator(
         if (!navigating) return
         val n = r.lat.size
         // nearest point of the route in a window around the last known position
-        val from = max(0, progressIdx - 3)
+        val from = max(0, progressIdx - 400)
         val to = min(n - 2, progressIdx + 400)
         val k = cos(Math.toRadians(l.latitude))
         var bestD = Double.MAX_VALUE
