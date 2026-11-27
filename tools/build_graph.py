@@ -643,14 +643,16 @@ def read_pbf(path):
             # Keep unsupported member types so malformed relations are rejected, not shortened.
             ordered = [(m.role, m.type, int(m.ref)) for m in r.members]
             if conditional_rules:
+                expanded = []
                 for conditional_kind, day_mask, start_minute, end_minute in conditional_rules:
                     parsed_nodes = parse_via_node_member_pairs(ordered, conditional_kind)
                     if not parsed_nodes:
                         self.unsupported_conditional += 1
                         return
-                    self.conditional_restrictions.extend(
+                    expanded.extend(
                         (*pair, conditional_kind, day_mask, start_minute, end_minute) for pair in parsed_nodes
                     )
+                self.conditional_restrictions.extend(expanded)
                 return
             parsed_via = parse_via_way_members(ordered)
             if parsed_via is not None:
