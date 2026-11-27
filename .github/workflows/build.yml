@@ -261,7 +261,7 @@ jobs:
         working-directory: tools
         run: |
           python build_relief.py ../app/src/main/assets/relief.mbtiles
-          cp /tmp/relief.stamp app/src/main/assets/relief.stamp
+          cp /tmp/relief.stamp ../app/src/main/assets/relief.stamp
 
       # Contour lines for the "Высоты" map type, computed from the relief DEM. Optional: the APK builds without them.
       - name: Build contour lines (elevation map type)
