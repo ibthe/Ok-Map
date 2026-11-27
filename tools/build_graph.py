@@ -59,6 +59,10 @@ def car_restriction_kind(tags):
 
 def parse_via_way_members(members):
     """Parse an ordered OSM restriction with exactly one from/to way and one or more via-ways."""
+    # Do not silently discard unexpected relation members: interpreting a malformed
+    # restriction after dropping a role can prohibit a broader set of turns than OSM intended.
+    if any(role not in ("from", "via", "to") for role, _, _ in members):
+        return None
     from_members = [(typ, int(ref)) for role, typ, ref in members if role == "from"]
     to_members = [(typ, int(ref)) for role, typ, ref in members if role == "to"]
     via_members = [(typ, int(ref)) for role, typ, ref in members if role == "via"]
@@ -73,6 +77,8 @@ def parse_via_way_members(members):
 
 def parse_via_node_members(members):
     """Parse a via-node restriction only when all three required member roles are exact."""
+    if any(role not in ("from", "via", "to") for role, _, _ in members):
+        return None
     from_members = [(typ, int(ref)) for role, typ, ref in members if role == "from"]
     via_members = [(typ, int(ref)) for role, typ, ref in members if role == "via"]
     to_members = [(typ, int(ref)) for role, typ, ref in members if role == "to"]
@@ -484,8 +490,7 @@ def read_pbf(path):
             if kind is None:
                 return
             # Keep unsupported member types so malformed relations are rejected, not shortened.
-            ordered = [(m.role, m.type, int(m.ref)) for m in r.members
-                       if m.role in ("from", "via", "to")]
+            ordered = [(m.role, m.type, int(m.ref)) for m in r.members]
             parsed_via = parse_via_way_members(ordered)
             if parsed_via is not None:
                 self.via_way_restrictions.append((*parsed_via, kind))
