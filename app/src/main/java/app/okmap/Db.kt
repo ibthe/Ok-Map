@@ -194,6 +194,17 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 2) {
         return out
     }
 
+    /** Stream track points in database order without materializing a potentially huge track in memory. */
+    fun forEachTrackPoint(id: Long, action: (Pt) -> Unit) {
+        readableDatabase.rawQuery(
+            "select lat,lon,ele,ts from track_points where track_id=? order by id", arrayOf(id.toString())
+        ).use { c ->
+            while (c.moveToNext()) {
+                action(Pt(c.getDouble(0), c.getDouble(1), if (c.isNull(2)) Double.NaN else c.getDouble(2), c.getLong(3)))
+            }
+        }
+    }
+
     /** Downsample large tracks for map rendering while preserving the first and last points. */
     fun trackLatLng(id: Long, maxPoints: Int = 8000): List<LatLng> {
         val db = readableDatabase
