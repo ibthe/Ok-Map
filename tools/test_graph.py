@@ -194,8 +194,11 @@ def via_way_graph(kind, with_bypass):
 
 no_via_graph, no_via_data, no_via_path = via_way_graph("no_straight_on", False)
 assert len(no_via_data["sequence_restrictions"]) >= 1
-assert no_via_graph.route(no_via_graph.snap(41.7300, 44.8050),
-                          no_via_graph.snap(41.7400, 44.8350)) is None, "no-via-way restriction was ignored"
+no_via_start = no_via_graph.snap(41.7300, 44.8050)
+no_via_end = no_via_graph.snap(41.7400, 44.8350)
+no_via_route = no_via_graph.route(no_via_start, no_via_end)
+print("via-way debug:", no_via_data["sequence_restrictions"], no_via_start, no_via_end, no_via_route)
+assert no_via_route is None, "no-via-way restriction was ignored"
 
 only_via_graph, only_via_data, only_via_path = via_way_graph("only_straight_on", True)
 assert len(only_via_data["sequence_restrictions"]) >= 3, only_via_data["sequence_restrictions"]
