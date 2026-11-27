@@ -44,7 +44,7 @@ class GraphRoutingTest {
         intArrayOf(-1, -1, -1).forEach { bytes.putInt(it) }   // no street names
         intArrayOf(0, 0, 0).forEach { bytes.putInt(it) }      // shape starts
         byteArrayOf(50, 30, 30, 0).forEach { bytes.put(it) }  // km/h, padded
-        byteArrayOf(171, 31, 31, 0).forEach { bytes.put(it) } // track + two paved roads, padded
+        byteArrayOf(171.toByte(), 31, 31, 0).forEach { bytes.put(it) } // track + two paved roads, padded
         repeat(3) { bytes.putShort(0) }
         bytes.putShort(0)                                    // padded shape counts
         bytes.putInt(0)                                      // name offsets
