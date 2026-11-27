@@ -482,10 +482,6 @@ class Graph(file: File) {
         val ke = e.seg
         val ls = segLen(ks)
         val le = segLen(ke)
-        if (ks == ke) {
-            if (e.off >= s.off && canForward(ks)) return listOf(Leg(ks, s.off, e.off, -1))
-            if (e.off < s.off && canBackward(ks)) return listOf(Leg(ks, s.off, e.off, -1))
-        }
         fun arcEnd(arc: Int): Int = if ((arc and 1) == 0) segB(arc / 2) else segA(arc / 2)
 
         fun addStart(arc: Int, node: Int, partialCost: Double) {
@@ -523,9 +519,27 @@ class Graph(file: File) {
         var bestState = -1L
         var bestEndArc = -1
         var directStartLeg: Leg? = null
+        // Same-segment travel is a candidate, not an unconditional shortcut: a paved bypass
+        // may be faster than an avoided unpaved segment.
+        if (ks == ke) {
+            if (e.off >= s.off && canForward(ks)) {
+                best = cost(ks, e.off - s.off, avoidUnpaved)
+                directStartLeg = Leg(ks, s.off, e.off, -1)
+            }
+            if (e.off < s.off && canBackward(ks)) {
+                val direct = cost(ks, s.off - e.off, avoidUnpaved)
+                if (direct < best) {
+                    best = direct
+                    directStartLeg = Leg(ks, s.off, e.off, -1)
+                }
+            }
+        }
         if (startAtNode && startNode == segA(ke) && canForward(ke)) {
-            best = cost(ke, e.off, avoidUnpaved)
-            directStartLeg = Leg(ke, 0.0, e.off, -1)
+            val direct = cost(ke, e.off, avoidUnpaved)
+            if (direct < best) {
+                best = direct
+                directStartLeg = Leg(ke, 0.0, e.off, -1)
+            }
         }
         if (startAtNode && startNode == segB(ke) && canBackward(ke)) {
             val direct = cost(ke, le - e.off, avoidUnpaved)

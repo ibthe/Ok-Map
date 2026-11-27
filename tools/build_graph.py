@@ -35,7 +35,7 @@ CLASSES = {
 }
 F_FWD, F_BACK, F_ROUNDABOUT, F_UNPAVED = 1, 2, 64, 128   # class id occupies bits 2..5
 UNPAVED = {"unpaved", "gravel", "dirt", "ground", "sand", "grass", "mud", "compacted", "fine_gravel", "earth", "pebblestone"}
-DENY = {"no", "private", "customers", "agricultural", "forestry", "military"}
+DENY = {"no", "private", "customers", "agricultural", "forestry", "military", "delivery", "permit", "restricted"}
 NO_TURN_RESTRICTIONS = {"no_left_turn", "no_right_turn", "no_u_turn", "no_straight_on"}
 ONLY_TURN_RESTRICTIONS = {"only_left_turn", "only_right_turn", "only_u_turn", "only_straight_on"}
 
@@ -106,9 +106,10 @@ def way_rules(tags):
         return None
     if tags.get("area") == "yes":
         return None
-    if tags.get("access") in DENY and tags.get("motor_vehicle") not in ("yes", "permissive", "destination"):
-        return None
-    if tags.get("motor_vehicle") in ("no", "private") or tags.get("vehicle") in ("no", "private") or tags.get("motorcar") == "no":
+    # OSM access tags are hierarchical: the most specific car tag overrides broader tags.
+    effective_access = next((tags.get(key) for key in ("motorcar", "motor_vehicle", "vehicle", "access")
+                             if tags.get(key)), "")
+    if effective_access in DENY:
         return None
     if hw == "service" and tags.get("service") in ("parking_aisle", "driveway", "emergency_access", "drive-through"):
         return None
@@ -126,10 +127,11 @@ def way_rules(tags):
     if junction in ("roundabout", "circular"):
         flags |= F_ROUNDABOUT
     ow = tags.get("oneway", "")
-    if ow in ("yes", "true", "1") or junction == "roundabout" or (hw in ("motorway", "motorway_link") and ow != "no"):
-        flags |= F_FWD
-    elif ow == "-1":
+    # Explicit reverse direction overrides implicit motorway / roundabout one-way rules.
+    if ow == "-1":
         flags |= F_BACK
+    elif ow in ("yes", "true", "1") or (junction == "roundabout" and ow != "no") or (hw in ("motorway", "motorway_link") and ow != "no"):
+        flags |= F_FWD
     else:
         flags |= F_FWD | F_BACK
     return cid, max(5, min(130, speed)), flags
