@@ -179,7 +179,7 @@ def via_way_graph(kind, with_bypass):
         ({"highway": "residential"}, [pts["a"], pts["b"]], 10),
         ({"highway": "residential", "oneway": "yes"}, [pts["b"], pts["c"], pts["d"]], 20),
         ({"highway": "residential"}, [pts["d"], pts["e"]], 30),
-        ({"highway": "residential"}, [pts["c"], pts["x"]], 60),
+        ({"highway": "residential", "oneway": "yes"}, [pts["c"], pts["x"]], 60),
     ]
     if with_bypass:
         ways.extend([
@@ -197,8 +197,13 @@ assert len(no_via_data["sequence_restrictions"]) >= 1
 no_via_start = no_via_graph.snap(41.7300, 44.8050)
 no_via_end = no_via_graph.snap(41.7400, 44.8350)
 no_via_route = no_via_graph.route(no_via_start, no_via_end)
-print("via-way debug:", no_via_data["sequence_restrictions"], no_via_start, no_via_end, no_via_route)
 assert no_via_route is None, "no-via-way restriction was ignored"
+
+no_detour_graph, _, _ = via_way_graph("no_straight_on", True)
+no_detour = no_detour_graph.route(no_detour_graph.snap(41.7300, 44.8050),
+                                  no_detour_graph.snap(41.7400, 44.8350))
+assert no_detour is not None and not ({1, 2} <= {k for k, _ in no_detour[1]}), (
+    "no-via-way restriction failed to select the available bypass", no_detour)
 
 only_via_graph, only_via_data, only_via_path = via_way_graph("only_straight_on", True)
 assert len(only_via_data["sequence_restrictions"]) >= 3, only_via_data["sequence_restrictions"]
