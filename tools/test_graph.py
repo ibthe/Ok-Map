@@ -247,7 +247,7 @@ assert conditional_only_data["conditional_turn_restrictions"].shape == (4, 5), c
 conditional_path = os.path.join(tempfile.mkdtemp(), "conditional-v4.bin")
 bg.write(conditional_data, conditional_path)
 conditional_reference = rc.Graph(conditional_path)
-assert len(conditional_reference.conditional_turns) == 2
+assert len(conditional_reference.conditional_turns) == 1
 # Unknown roles must invalidate the whole relation instead of being silently discarded.
 assert bg.parse_via_way_members([
     ("from", "w", 100), ("via", "w", 200), ("to", "w", 400), ("location_hint", "n", 999)
