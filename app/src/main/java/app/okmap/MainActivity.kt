@@ -2165,29 +2165,42 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun writeGpx(uri: Uri) {
-        try {
-            val iso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
-            val sb = StringBuilder()
-            sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
-            sb.append("<gpx version=\"1.1\" creator=\"Ok Map\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n")
-            for (w in userDb.waypoints()) {
-                sb.append("<wpt lat=\"${w.lat}\" lon=\"${w.lon}\"><name>${esc(w.name)}</name><type>${esc(w.folder)}</type></wpt>\n")
-            }
-            for (t in userDb.tracks()) {
-                sb.append("<trk><name>${esc(t.name)}</name><trkseg>\n")
-                for (p in userDb.trackPoints(t.id)) {
-                    sb.append("<trkpt lat=\"${p.lat}\" lon=\"${p.lon}\">")
-                    if (!p.ele.isNaN()) sb.append("<ele>${p.ele}</ele>")
-                    if (p.ts > 0) sb.append("<time>${iso.format(Date(p.ts))}</time>")
-                    sb.append("</trkpt>\n")
+        toast("Экспортирую GPX…")
+        thread(name = "gpx-export") {
+            val exportDb = UserDb(applicationContext)
+            var error: String? = null
+            try {
+                val iso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
                 }
-                sb.append("</trkseg></trk>\n")
+                val stream = contentResolver.openOutputStream(uri)
+                    ?: throw IllegalStateException("Не удалось открыть файл для записи")
+                stream.bufferedWriter(Charsets.UTF_8).use { out ->
+                    out.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+                    out.write("<gpx version=\"1.1\" creator=\"Ok Map\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n")
+                    for (w in exportDb.waypoints()) {
+                        out.write("<wpt lat=\"${w.lat}\" lon=\"${w.lon}\"><name>${esc(w.name)}</name><type>${esc(w.folder)}</type></wpt>\n")
+                    }
+                    for (t in exportDb.tracks()) {
+                        out.write("<trk><name>${esc(t.name)}</name><trkseg>\n")
+                        exportDb.forEachTrackPoint(t.id) { p ->
+                            out.write("<trkpt lat=\"${p.lat}\" lon=\"${p.lon}\">")
+                            if (!p.ele.isNaN()) out.write("<ele>${p.ele}</ele>")
+                            if (p.ts > 0) out.write("<time>${iso.format(Date(p.ts))}</time>")
+                            out.write("</trkpt>\n")
+                        }
+                        out.write("</trkseg></trk>\n")
+                    }
+                    out.write("</gpx>\n")
+                }
+            } catch (e: Exception) {
+                error = e.message ?: e.javaClass.simpleName
+            } finally {
+                try { exportDb.close() } catch (_: Exception) {}
             }
-            sb.append("</gpx>\n")
-            contentResolver.openOutputStream(uri)?.use { it.write(sb.toString().toByteArray(Charsets.UTF_8)) }
-            toast("GPX сохранён")
-        } catch (e: Exception) {
-            toast("Ошибка экспорта: ${e.message}")
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) toast(if (error == null) "GPX сохранён" else "Ошибка экспорта: $error")
+            }
         }
     }
 
