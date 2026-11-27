@@ -51,18 +51,21 @@ class OfflineAppSmokeTest {
                 val id = db.newTrack("committed track")
                 db.addPoints(id, listOf(
                     UserDb.Pt(41.7, 44.8, Double.NaN, 10L, segment = 0),
-                    UserDb.Pt(41.8, 44.9, 120.0, 20L, segment = 1)
+                    UserDb.Pt(41.71, 44.81, 110.0, 15L, segment = 0),
+                    UserDb.Pt(41.8, 44.9, 120.0, 20L, segment = 1),
+                    UserDb.Pt(41.81, 44.91, 130.0, 25L, segment = 1)
                 ))
                 id
             }
 
             assertEquals("saved", db.waypoints().single().name)
-            assertEquals(2, db.trackPoints(trackId).size)
-            assertEquals(listOf(0, 1), db.trackPoints(trackId).map { it.segment })
+            assertEquals(4, db.trackPoints(trackId).size)
+            assertEquals(listOf(0, 0, 1, 1), db.trackPoints(trackId).map { it.segment })
             val streamed = ArrayList<UserDb.Pt>()
             db.forEachTrackPoint(trackId) { streamed.add(it) }
             assertEquals(db.trackPoints(trackId), streamed)
-            assertEquals(listOf(0, 1), streamed.map { it.segment })
+            assertEquals(listOf(0, 0, 1, 1), streamed.map { it.segment })
+            assertEquals(listOf(2, 2), db.trackLatLngSegments(trackId).map { it.size })
         } finally {
             db.close()
         }
