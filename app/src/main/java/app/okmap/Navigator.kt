@@ -345,7 +345,7 @@ class Navigator(
         btnGo.visibility = if (preview) View.VISIBLE else View.GONE
         btnCancel.text = if (preview) "Отмена" else "Завершить"
         val r = route ?: return
-        updateStats(r.distance - along, r.seconds * max(0.0, r.distance - along) / max(1.0, r.distance))
+        updateStats(r.distance - along, r.remainingSeconds(along))
         if (preview) navSub.text = previewSub()
     }
 
@@ -366,7 +366,7 @@ class Navigator(
     private fun updateGuidance(l: Location?) {
         val r = route ?: return
         val rest = max(0.0, r.distance - along)
-        updateStats(rest, r.seconds * rest / max(1.0, r.distance))
+        updateStats(rest, r.remainingSeconds(along))
         while (stepIdx < r.steps.size - 1 && r.cum[r.steps[stepIdx].pointIdx] <= along + 8.0) stepIdx++
         val st = r.steps[min(stepIdx, r.steps.size - 1)]
         val dist = max(0.0, r.cum[st.pointIdx] - along)
