@@ -66,6 +66,7 @@ class Route(
  * Algorithm and file layout are mirrored by tools/route_check.py, which is tested in CI.
  */
 internal data class SequenceRestriction(val type: Int, val prefix: IntArray, val allowed: IntArray)
+private data class ConditionalTurn(val incoming: Int, val outgoing: Int, val days: Int, val startMinute: Int, val endMinute: Int)
 
 /** Aho-Corasick automaton over directed road arcs; supports overlapping via-way restrictions. */
 internal class RestrictionAutomaton(restrictions: List<SequenceRestriction>) {
@@ -156,6 +157,7 @@ class Graph(file: File) {
     private val gh: Int
     private val cellDataLen: Int
     private val turnRestrictions = HashSet<Long>()
+    private val conditionalTurnRestrictions = ArrayList<ConditionalTurn>()
     private lateinit var restrictionAutomaton: RestrictionAutomaton
 
     private val oNLat: Int
@@ -183,7 +185,7 @@ class Graph(file: File) {
         raf.close()
         require(buf.getInt(0) == 0x32474B4F) { "graph.bin: wrong format" }
         val formatVersion = buf.getInt(4)
-        require(formatVersion == 1 || formatVersion == 2 || formatVersion == 3) { "graph.bin: unsupported version $formatVersion" }
+        require(formatVersion == 1 || formatVersion == 2 || formatVersion == 3 || formatVersion == 4) { "graph.bin: unsupported version $formatVersion" }
         nodes = buf.getInt(8)
         segments = buf.getInt(12)
         shapePts = buf.getInt(16)
@@ -273,7 +275,28 @@ class Graph(file: File) {
                     }
                     sequenceRestrictions.add(SequenceRestriction(type, prefix, allowed))
                 }
-                require(q == buf.limit()) { "graph.bin: unexpected trailing sequence data" }
+                if (formatVersion == 3) {
+                    require(q == buf.limit()) { "graph.bin: unexpected trailing sequence data" }
+                } else {
+                    require(q.toLong() + 4L <= buf.limit().toLong()) { "graph.bin: missing conditional turn section" }
+                    val conditionalCount = buf.getInt(q); q += 4
+                    require(conditionalCount >= 0 &&
+                        q.toLong() + conditionalCount.toLong() * 20L <= buf.limit().toLong()) {
+                        "graph.bin: invalid conditional turn section size"
+                    }
+                    repeat(conditionalCount) {
+                        val incoming = buf.getInt(q); q += 4
+                        val outgoing = buf.getInt(q); q += 4
+                        val days = buf.getInt(q); q += 4
+                        val startMinute = buf.getInt(q); q += 4
+                        val endMinute = buf.getInt(q); q += 4
+                        require(incoming in 0 until segments * 2 && outgoing in 0 until segments * 2 &&
+                            days in 1..0x7f && startMinute in 0..1439 && endMinute in 1..1440 &&
+                            startMinute < endMinute) { "graph.bin: invalid conditional turn record" }
+                        conditionalTurnRestrictions.add(ConditionalTurn(incoming, outgoing, days, startMinute, endMinute))
+                    }
+                    require(q == buf.limit()) { "graph.bin: unexpected trailing conditional turn data" }
+                }
             }
         }
         restrictionAutomaton = RestrictionAutomaton(sequenceRestrictions)
@@ -462,14 +485,31 @@ class Graph(file: File) {
     }
 
     /** Fastest route between two snapped points, or null if they are not connected (one-way streets respected). */
-    private fun forbiddenTurn(inArc: Int, outArc: Int): Boolean =
-        turnRestrictions.contains((inArc.toLong() shl 32) or (outArc.toLong() and 0xffffffffL))
+    private fun forbiddenTurn(inArc: Int, outArc: Int, activeConditional: Set<Long>): Boolean {
+        val key = (inArc.toLong() shl 32) or (outArc.toLong() and 0xffffffffL)
+        return turnRestrictions.contains(key) || activeConditional.contains(key)
+    }
+
+    private fun activeConditionalTurnKeys(nowMillis: Long): Set<Long> {
+        if (conditionalTurnRestrictions.isEmpty()) return emptySet()
+        val calendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Asia/Tbilisi"))
+        calendar.timeInMillis = nowMillis
+        val dayIndex = (calendar.get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7 // Monday = 0
+        val dayBit = 1 shl dayIndex
+        val minute = calendar.get(java.util.Calendar.HOUR_OF_DAY) * 60 +
+            calendar.get(java.util.Calendar.MINUTE)
+        return conditionalTurnRestrictions.asSequence()
+            .filter { (it.days and dayBit) != 0 && minute >= it.startMinute && minute < it.endMinute }
+            .mapTo(HashSet()) { (it.incoming.toLong() shl 32) or (it.outgoing.toLong() and 0xffffffffL) }
+    }
 
     /** Fastest route using directed-arc states; the incoming road is retained at every junction. */
     fun route(
         s: Snap, e: Snap, avoidUnpaved: Boolean,
-        penalizedArcs: Set<Int> = emptySet(), penaltyFactor: Double = 1.0
+        penalizedArcs: Set<Int> = emptySet(), penaltyFactor: Double = 1.0,
+        nowMillis: Long = System.currentTimeMillis()
     ): List<Leg>? {
+        val activeConditional = activeConditionalTurnKeys(nowMillis)
         val inf = Double.MAX_VALUE
         val penaltyMultiplier = if (penaltyFactor.isFinite()) max(1.0, penaltyFactor) else 1.0
         fun adjustedCost(segment: Int, meters: Double, arc: Int): Double {
@@ -567,7 +607,7 @@ class Graph(file: File) {
             if (node == segA(ke) && canForward(ke)) {
                 val endArc = 2 * ke
                 val tail = adjustedCost(ke, e.off, endArc)
-                if (!forbiddenTurn(inArc, endArc) && !restrictionAutomaton.blocks(acState, endArc) &&
+                if (!forbiddenTurn(inArc, endArc, activeConditional) && !restrictionAutomaton.blocks(acState, endArc) &&
                     currentCost + tail < best) {
                     best = currentCost + tail; bestState = state; bestEndArc = endArc
                 }
@@ -587,7 +627,7 @@ class Graph(file: File) {
                 if (segA(k) == node && canForward(k)) { outArc = 2 * k; next = segB(k) }
                 else if (segB(k) == node && canBackward(k)) { outArc = 2 * k + 1; next = segA(k) }
                 else continue
-                if (forbiddenTurn(inArc, outArc) || restrictionAutomaton.blocks(acState, outArc)) continue
+                if (forbiddenTurn(inArc, outArc, activeConditional) || restrictionAutomaton.blocks(acState, outArc)) continue
                 val nextAc = restrictionAutomaton.next(acState, outArc)
                 if (restrictionAutomaton.isForbidden(nextAc)) continue
                 val nextState = key(outArc, nextAc)
@@ -633,12 +673,15 @@ class Graph(file: File) {
      * Find a meaningfully different second route by penalizing every directed arc
      * used by the primary route. Return it only when the real travel cost stays reasonable.
      */
-    fun routeAlternative(s: Snap, e: Snap, avoidUnpaved: Boolean, primary: List<Leg>): List<Leg>? {
+    fun routeAlternative(
+        s: Snap, e: Snap, avoidUnpaved: Boolean, primary: List<Leg>,
+        nowMillis: Long = System.currentTimeMillis()
+    ): List<Leg>? {
         val primaryArcs = primary.mapTo(HashSet()) {
             2 * it.seg + if (it.to < it.from) 1 else 0
         }
         if (primaryArcs.isEmpty()) return null
-        val alternative = route(s, e, avoidUnpaved, primaryArcs, 3.0) ?: return null
+        val alternative = route(s, e, avoidUnpaved, primaryArcs, 3.0, nowMillis) ?: return null
         val alternativeArcs = alternative.mapTo(HashSet()) {
             2 * it.seg + if (it.to < it.from) 1 else 0
         }
