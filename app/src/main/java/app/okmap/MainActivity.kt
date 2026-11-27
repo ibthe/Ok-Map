@@ -1201,6 +1201,17 @@ class MainActivity : AppCompatActivity() {
                 while (c.moveToNext()) tables.add(c.getString(0))
             }
             require("metadata" in tables && "tiles" in tables) { "Это не MBTiles-файл" }
+            val metadata = HashMap<String, String>()
+            d.rawQuery("select name, value from metadata", null).use { c ->
+                while (c.moveToNext()) metadata[c.getString(0)] = c.getString(1)
+            }
+            val format = metadata["format"]?.lowercase()
+            require(format in setOf("jpg", "jpeg", "png", "webp")) { "Не указан поддерживаемый формат тайлов" }
+            val minZoom = metadata["minzoom"]?.toIntOrNull()
+            val maxZoom = metadata["maxzoom"]?.toIntOrNull()
+            require(minZoom != null && maxZoom != null && minZoom in 0..22 && maxZoom in minZoom..22) {
+                "Некорректные minzoom/maxzoom в MBTiles"
+            }
             val count = d.rawQuery("select count(*) from tiles where tile_data is not null", null).use {
                 if (it.moveToFirst()) it.getInt(0) else 0
             }
@@ -1209,10 +1220,15 @@ class MainActivity : AppCompatActivity() {
             d.rawQuery("select tile_data from tiles where tile_data is not null limit 16", null).use { c ->
                 while (c.moveToNext() && validImages == 0) {
                     val bytes = c.getBlob(0)
-                    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                    if (bitmap != null) {
+                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+                    val expectedMime = when (format) {
+                        "jpg", "jpeg" -> "image/jpeg"
+                        "png" -> "image/png"
+                        else -> "image/webp"
+                    }
+                    if (options.outWidth in 1..1024 && options.outHeight in 1..1024 && options.outMimeType == expectedMime) {
                         validImages++
-                        bitmap.recycle()
                     }
                 }
             }
@@ -1918,15 +1934,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showTrackElevationProfile(id: Long) {
-        val points = userDb.trackPoints(id)
-        if (points.size < 2) { toast("В треке недостаточно точек"); return }
         val trackName = userDb.tracks().firstOrNull { it.id == id }?.name ?: "Трек"
         toast("Строю профиль высот…")
         thread(name = "track-elevation-profile") {
-            val coordinates = points.map { LatLng(it.lat, it.lon) }
+            // Read and sample in the background so long recordings never freeze the map UI.
+            val points = runCatching { userDb.trackPoints(id) }.getOrNull()
+            if (points == null || points.size < 2) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) toast("В треке недостаточно точек")
+                }
+                return@thread
+            }
             val distances = DoubleArray(points.size)
-            for (i in 1 until points.size) {
-                distances[i] = distances[i - 1] + coordinates[i - 1].distanceTo(coordinates[i])
+            var distance = 0.0
+            var previous: LatLng? = null
+            for (i in points.indices) {
+                val current = LatLng(points[i].lat, points[i].lon)
+                if (previous != null) distance += previous.distanceTo(current)
+                distances[i] = distance
+                previous = current
             }
             val maxSamples = 300
             val indexes = if (points.size <= maxSamples) points.indices.toList()
@@ -1934,8 +1960,8 @@ class MainActivity : AppCompatActivity() {
             val samples = ArrayList<ElevationSample>(indexes.size)
             for (index in indexes) {
                 val p = points[index]
-                val altitude = if (p.ele.isFinite()) p.ele else
-                    runCatching { elevation?.at(p.lat, p.lon)?.toDouble() }.getOrNull()
+                val demAltitude = runCatching { elevation?.at(p.lat, p.lon)?.toDouble() }.getOrNull()
+                val altitude = demAltitude ?: p.ele.takeIf { it.isFinite() }
                 if (altitude != null && altitude.isFinite()) samples.add(ElevationSample(distances[index], altitude))
             }
             runOnUiThread {

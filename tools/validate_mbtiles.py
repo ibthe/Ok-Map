@@ -20,6 +20,13 @@ def validate(path):
         columns = {row[1] for row in db.execute("PRAGMA table_info(tiles)")}
         if not {"zoom_level", "tile_column", "tile_row", "tile_data"}.issubset(columns):
             raise ValueError("MBTiles tiles table has an invalid schema")
+        metadata = dict(db.execute("SELECT name, value FROM metadata"))
+        image_format = str(metadata.get("format", "")).lower()
+        expected_format = {"jpg": "JPEG", "jpeg": "JPEG", "png": "PNG", "webp": "WEBP"}.get(image_format)
+        min_zoom = int(metadata.get("minzoom", -1))
+        max_zoom = int(metadata.get("maxzoom", -1))
+        if expected_format is None or not (0 <= min_zoom <= max_zoom <= 22):
+            raise ValueError("MBTiles must declare a supported raster format and valid minzoom/maxzoom")
         count = db.execute("SELECT count(*) FROM tiles WHERE tile_data IS NOT NULL").fetchone()[0]
         if count < 1:
             raise ValueError("MBTiles contains no raster tiles")
@@ -40,7 +47,7 @@ def validate(path):
             continue
         try:
             image = Image.open(io.BytesIO(payload))
-            if image.format not in ("JPEG", "PNG", "WEBP"):
+            if image.format != expected_format:
                 continue
             image.verify()
             valid += 1

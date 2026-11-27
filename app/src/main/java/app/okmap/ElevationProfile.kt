@@ -91,20 +91,23 @@ class ElevationProfileView(
 
         val minElevation = valid.minOf { it.elevationMeters }
         val maxElevation = valid.maxOf { it.elevationMeters }
-        val elevationRange = max(10.0, maxElevation - minElevation)
+        val actualRange = maxElevation - minElevation
+        val elevationRange = max(10.0, actualRange)
+        val chartMin = minElevation - (elevationRange - actualRange) / 2.0
+        val chartMax = chartMin + elevationRange
         val distanceRange = max(1.0, valid.last().distanceMeters - valid.first().distanceMeters)
         for (i in 0..4) {
             val fraction = i / 4.0
             val y = top + ((bottom - top) * fraction).toFloat()
             canvas.drawLine(left, y, right, y, gridPaint)
-            val value = (maxElevation - elevationRange * fraction).roundToInt()
+            val value = (chartMax - elevationRange * fraction).roundToInt()
             canvas.drawText("$value м", dp(2f), y + dp(3f), textPaint)
         }
 
         val line = Path()
         valid.forEachIndexed { index, sample ->
             val x = left + ((sample.distanceMeters - valid.first().distanceMeters) / distanceRange * (right - left)).toFloat()
-            val y = bottom - ((sample.elevationMeters - minElevation) / elevationRange * (bottom - top)).toFloat()
+            val y = bottom - ((sample.elevationMeters - chartMin) / elevationRange * (bottom - top)).toFloat()
             if (index == 0) line.moveTo(x, y) else line.lineTo(x, y)
         }
         val fill = Path(line).apply {

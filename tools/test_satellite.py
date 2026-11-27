@@ -56,6 +56,7 @@ def run():
         bad.executescript("""
             create table metadata (name text, value text);
             create table tiles (zoom_level integer, tile_column integer, tile_row integer, tile_data blob);
+            insert into metadata values ('format', 'jpg'), ('minzoom', '0'), ('maxzoom', '0');
             insert into tiles values (0, 0, 0, X'3C68746D6C3E');
         """)
         bad.commit()
