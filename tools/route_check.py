@@ -79,7 +79,7 @@ class Graph:
                     nxt = self.ac_edges[state].get(arc)
                     if nxt is None:
                         nxt = len(self.ac_edges); self.ac_edges[state][arc] = nxt
-                        self.ac_edges.append({}); self.ac_fail.append(0); self.ac_bad.append(False); local_only.append([])
+                        self.ac_edges.append({}); self.ac_fail.append(0); self.ac_bad.append(False); self.ac_only.append(None); local_only.append([])
                     state = nxt
                 if typ == 1: self.ac_bad[state] = True
                 else: local_only[state].append(frozenset(arcs[plen:]))
