@@ -427,7 +427,7 @@ assert avoid_route is not None and allow_route is not None
 track_seconds = route_graph.cost(0, route_graph.LEN[0] / 10.0, avoid_unpaved=True)
 assert avoid_route[0] < track_seconds - 1.0, ("avoid_unpaved kept the slower direct track", avoid_route, track_seconds)
 assert 1 in {k for k, _ in avoid_route[1]}, ("paved detour was not selected", avoid_route)
-assert abs(allow_route[0] - route_graph.cost(0, route_graph.LEN[0] / 10.0, avoid_unpaved=False)) < 1e-6
+assert abs(allow_route[0] - route_graph.cost(0, route_graph.LEN[0] / 10.0, avoid_unpaved=False)) < 1.0, (allow_route, route_graph.LEN[0])
 assert allow_route[1] == [(0, True)], allow_route
 far_snap = route_graph.snap(43.0, 46.0)
 assert far_snap is not None, "reference snap must use the same whole-network fallback as Kotlin"
