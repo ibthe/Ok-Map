@@ -42,10 +42,10 @@ class Graph:
         self.name_bytes = raw[pos[0]:pos[0] + self.NB]
         pos[0] += self.NB + (-self.NB) % 4
         self.cell_start, self.cell_data = take("<i4", self.W * self.H + 1), take("<i4", self.CD)
-        if self.version not in (1, 2):
+        if self.version not in (1, 2, 3):
             raise ValueError(f"unsupported graph format version {self.version}")
         self.turns = set()
-        if self.version == 2:
+        if self.version in (2, 3):
             if pos[0] + 4 > len(raw):
                 raise ValueError("missing turn-restriction section")
             count = struct.unpack_from("<i", raw, pos[0])[0]
@@ -56,6 +56,50 @@ class Graph:
             if pairs.size and (np.any(pairs < 0) or np.any(pairs >= self.S * 2)):
                 raise ValueError("turn-restriction arc id out of range")
             self.turns = {(int(a), int(b)) for a, b in pairs}
+            pos[0] += count * 8
+        if self.version == 3:
+            if pos[0] + 4 > len(raw):
+                raise ValueError("missing sequence-restriction section")
+            nseq, = struct.unpack_from("<i", raw, pos[0]); pos[0] += 4
+            if nseq < 0: raise ValueError("invalid sequence-restriction count")
+            self.ac_edges, self.ac_fail, self.ac_bad, self.ac_only = [{}], [0], [False], [None]
+            local_only = [[]]
+            for _ in range(nseq):
+                if pos[0] + 12 > len(raw): raise ValueError("truncated sequence restriction")
+                typ, plen, alen = struct.unpack_from("<iii", raw, pos[0]); pos[0] += 12
+                if typ not in (1, 2) or plen < 1 or alen < 0 or (typ == 1 and alen != 0) or (typ == 2 and alen < 1):
+                    raise ValueError("invalid sequence restriction header")
+                n = plen + alen
+                if pos[0] + 4 * n > len(raw): raise ValueError("truncated sequence restriction arcs")
+                arcs = list(struct.unpack_from("<" + "i" * n, raw, pos[0])); pos[0] += 4 * n
+                if any(a < 0 or a >= self.S * 2 for a in arcs): raise ValueError("sequence restriction arc out of range")
+                state = 0
+                for arc in arcs[:plen]:
+                    nxt = self.ac_edges[state].get(arc)
+                    if nxt is None:
+                        nxt = len(self.ac_edges); self.ac_edges[state][arc] = nxt
+                        self.ac_edges.append({}); self.ac_fail.append(0); self.ac_bad.append(False); local_only.append([])
+                    state = nxt
+                if typ == 1: self.ac_bad[state] = True
+                else: local_only[state].append(frozenset(arcs[plen:]))
+            from collections import deque
+            q = deque(self.ac_edges[0].values())
+            while q:
+                state = q.popleft()
+                f = self.ac_fail[state]
+                self.ac_bad[state] = self.ac_bad[state] or self.ac_bad[f]
+                inherited, sets = self.ac_only[f], local_only[state]
+                if inherited is not None or sets:
+                    allowed = set(inherited) if inherited is not None else None
+                    for item in sets:
+                        allowed = set(item) if allowed is None else allowed.intersection(item)
+                    self.ac_only[state] = frozenset(allowed)
+                for arc, child in self.ac_edges[state].items():
+                    q.append(child)
+                    f = self.ac_fail[state]
+                    while f and arc not in self.ac_edges[f]: f = self.ac_fail[f]
+                    self.ac_fail[child] = self.ac_edges[f].get(arc, 0)
+            if pos[0] != len(raw): raise ValueError("unexpected trailing sequence-restriction data")
         elif pos[0] != len(raw):
             raise ValueError("unexpected trailing data in graph format v1")
 
