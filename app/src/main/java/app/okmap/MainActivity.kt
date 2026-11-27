@@ -698,8 +698,8 @@ class MainActivity : AppCompatActivity() {
         val id = if (TrackService.running) prefs.getLong("rec_track", 0L) else shownTrackId
         val generation = ++trackRenderGeneration
         thread(name = "track-render") {
-            val points = if (id > 0) runCatching { userDb.trackLatLng(id) }.getOrDefault(emptyList()) else emptyList()
-            val geoJson = Geo.lineFc(points)
+            val segments = if (id > 0) runCatching { userDb.trackLatLngSegments(id) }.getOrDefault(emptyList()) else emptyList()
+            val geoJson = Geo.multiLineFc(segments)
             runOnUiThread {
                 if (!isFinishing && !isDestroyed && generation == trackRenderGeneration) {
                     src("ovl-track")?.setGeoJson(geoJson)
@@ -2067,8 +2067,13 @@ class MainActivity : AppCompatActivity() {
             var distance = 0.0
             var index = 0
             var previous: LatLng? = null
+            var previousSegment = -1
             val read = runCatching {
                 userDb.forEachTrackPoint(id) { p ->
+                    if (p.segment != previousSegment) {
+                        previous = null
+                        previousSegment = p.segment
+                    }
                     val current = LatLng(p.lat, p.lon)
                     if (previous != null) distance += previous!!.distanceTo(current)
                     if (index % step == 0 || index == pointCount - 1) {
@@ -2128,7 +2133,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun fitTrack(id: Long) {
         thread(name = "fit-track") {
-            val points = runCatching { userDb.trackLatLng(id) }.getOrDefault(emptyList())
+            val segments = runCatching { userDb.trackLatLngSegments(id) }.getOrDefault(emptyList())
+            val points = segments.flatten()
             if (points.size < 2) return@thread
             val bounds = LatLngBounds.Builder()
             points.forEach { bounds.include(it) }
