@@ -536,7 +536,7 @@ def parse_conditional_restrictions(value):
     for clause in clauses:
         if not clause.strip():
             return []
-        match = re.fullmatch(r"\\s*([a-z_]+)\\s*@\\s*\\(([^)]+)\\)\\s*", clause)
+        match = re.fullmatch(r"\s*([a-z_]+)\s*@\s*\(([^)]+)\)\s*", clause)
         if not match:
             return []
         kind, condition = match.group(1), match.group(2).strip()
@@ -582,7 +582,7 @@ def parse_conditional_restrictions(value):
             if len(times) != 2:
                 return []
             def minute(text, allow_24=False):
-                m = re.fullmatch(r"(\\d{2}):(\\d{2})", text)
+                m = re.fullmatch(r"(\d{2}):(\d{2})", text)
                 if not m:
                     return None
                 hour, minute_value = int(m.group(1)), int(m.group(2))
