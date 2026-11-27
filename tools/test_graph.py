@@ -207,7 +207,7 @@ assert 1 in [k for k, _ in only_via_route[1]] and 2 in [k for k, _ in only_via_r
 print("graph v3 ordered via-way no_/only_ routing tests passed")
 
 # v2 remains readable after the v3 writer adds its sequence section.
-v2_raw = bytearray(open(no_via_path, "rb").read())
+v2_raw = bytearray(open(p, "rb").read())
 struct.pack_into("<i", v2_raw, 4, 2)
 v2_path = os.path.join(tempfile.mkdtemp(), "legacy-v2.bin")
 open(v2_path, "wb").write(v2_raw[:-4])
