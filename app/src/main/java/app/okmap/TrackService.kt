@@ -13,6 +13,8 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
 import androidx.core.app.NotificationCompat
@@ -30,11 +32,26 @@ class TrackService : Service() {
     private var db: UserDb? = null
     private var lm: LocationManager? = null
     private var trackId = 0L
+    private var writerThread: HandlerThread? = null
+    private var writer: Handler? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        val thread = HandlerThread("ok-map-track-db")
+        thread.start()
+        writerThread = thread
+        writer = Handler(thread.looper)
+    }
 
     private val listener = object : LocationListener {
         override fun onLocationChanged(l: Location) {
-            if (trackId > 0) {
-                db?.addPoint(trackId, l.latitude, l.longitude, if (l.hasAltitude()) l.altitude else Double.NaN, l.time)
+            val id = trackId
+            if (id <= 0L) return
+            val point = UserDb.Pt(l.latitude, l.longitude, if (l.hasAltitude()) l.altitude else Double.NaN, l.time)
+            // Location callbacks arrive on the main looper. Queue SQLite writes so slow storage
+            // cannot freeze map gestures, navigation guidance, or the recording UI.
+            writer?.post {
+                try { db?.addPoint(id, point.lat, point.lon, point.ele, point.ts) } catch (_: Exception) {}
             }
         }
 
@@ -108,9 +125,23 @@ class TrackService : Service() {
 
     override fun onDestroy() {
         try { lm?.removeUpdates(listener) } catch (_: Exception) {}
-        try { db?.close() } catch (_: Exception) {}
-        db = null
         running = false
+        val handler = writer
+        val thread = writerThread
+        if (handler != null && thread != null) {
+            // This is queued after all accepted location writes, so the DB is closed only
+            // after the recording queue has drained.
+            handler.post {
+                try { db?.close() } catch (_: Exception) {}
+                db = null
+                thread.quitSafely()
+            }
+        } else {
+            try { db?.close() } catch (_: Exception) {}
+            db = null
+        }
+        writer = null
+        writerThread = null
         super.onDestroy()
     }
 }
