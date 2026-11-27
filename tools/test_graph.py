@@ -278,6 +278,42 @@ assert not reversed_data["sequence_restrictions"], "via-way member order was ign
 print("multiple ordered via-way members and order-sensitive resolution tests passed")
 
 
+# Overlapping via-way prefixes: after traversing A->B->C, the suffix B->C
+# must still activate the second restriction and force the reverse-side bypass.
+overlap_pts = {
+    "a": (8001, 41.8400, 44.8000),
+    "b": (8002, 41.8400, 44.8100),
+    "c": (8003, 41.8450, 44.8200),
+    "d": (8004, 41.8500, 44.8300),
+    "e": (8005, 41.8500, 44.8400),
+    "f": (8006, 41.8550, 44.8350),
+}
+overlap_ways = [
+    ({"highway": "residential"}, [overlap_pts["a"], overlap_pts["b"]], 810),
+    ({"highway": "residential", "oneway": "yes"}, [overlap_pts["b"], overlap_pts["c"]], 820),
+    ({"highway": "residential", "oneway": "yes"}, [overlap_pts["c"], overlap_pts["d"]], 830),
+    ({"highway": "residential"}, [overlap_pts["d"], overlap_pts["e"]], 840),
+    ({"highway": "residential", "oneway": "yes"}, [overlap_pts["d"], overlap_pts["f"]], 850),
+    ({"highway": "residential", "oneway": "yes"}, [overlap_pts["f"], overlap_pts["e"]], 860),
+]
+overlap_data = bg.build(overlap_ways, min_component=1, via_way_restrictions=[
+    (810, (820,), 830, "only_straight_on"),
+    (820, (830,), 840, "no_straight_on"),
+])
+overlap_path = os.path.join(tempfile.mkdtemp(), "overlap-via-way.bin")
+bg.write(overlap_data, overlap_path)
+overlap_graph = rc.Graph(overlap_path)
+overlap_route = overlap_graph.route(
+    overlap_graph.snap(41.8400, 44.8050),
+    overlap_graph.snap(41.8500, 44.8350))
+assert overlap_route is not None, "overlapping restriction prefixes should preserve the bypass"
+overlap_legs = overlap_route[1]
+assert (3, True) not in overlap_legs, ("suffix via-way restriction was lost by automaton fallback", overlap_legs)
+assert {(4, True), (5, True), (3, False)}.issubset(set(overlap_legs)), (
+    "overlapping restriction did not select the bypass and reverse approach", overlap_legs)
+print("overlapping via-way prefix automaton test passed")
+
+
 # High-latitude grid search: longitude cells shrink with cos(latitude), so a
 # height-only stopping radius can miss a closer road two columns away.
 snap_ways = [
