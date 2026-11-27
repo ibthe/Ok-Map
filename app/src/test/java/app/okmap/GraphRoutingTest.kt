@@ -27,7 +27,7 @@ class GraphRoutingTest {
         val bytes = ByteBuffer.allocate(240).order(ByteOrder.LITTLE_ENDIAN)
 
         intArrayOf(
-            0x32474B4F, 3, 3, 3, 0, 6, 0, 0, 50,
+            0x32474B4F, 3, 3, 3, 0, 6, 0, 0, 80,
             41695000, 44795000, 5000, 1, 1, 0,
             0, 0, 0, 0, 0
         ).forEach { bytes.putInt(it) }
@@ -43,7 +43,7 @@ class GraphRoutingTest {
         intArrayOf(trackDm, paved1Dm, paved2Dm).forEach { bytes.putInt(it) }
         intArrayOf(-1, -1, -1).forEach { bytes.putInt(it) }   // no street names
         intArrayOf(0, 0, 0).forEach { bytes.putInt(it) }      // shape starts
-        byteArrayOf(30, 50, 50, 0).forEach { bytes.put(it) }  // km/h, padded
+        byteArrayOf(80, 50, 50, 0).forEach { bytes.put(it) }  // km/h, padded
         byteArrayOf(171.toByte(), 31, 31, 0).forEach { bytes.put(it) } // track + two paved roads, padded
         repeat(3) { bytes.putShort(0) }
         bytes.putShort(0)                                    // padded shape counts
