@@ -320,6 +320,10 @@ class Navigator(
             } else if (movingAgainstRoute) {
                 progressIdx = bestJ
                 along = bestAlong
+                // Maneuvers passed earlier are ahead again after reversing; allow them to be announced anew.
+                for (i in announced.indices) {
+                    if (r.cum[r.steps[i].pointIdx] > along + 50.0) announced[i] = 0
+                }
             }
         } else {
             offCount++
@@ -390,6 +394,7 @@ class Navigator(
         val r = route ?: return
         val rest = max(0.0, r.distance - along)
         updateStats(rest, r.remainingSeconds(along))
+        while (stepIdx > 1 && r.cum[r.steps[stepIdx - 1].pointIdx] > along + 8.0) stepIdx--
         while (stepIdx < r.steps.size - 1 && r.cum[r.steps[stepIdx].pointIdx] <= along + 8.0) stepIdx++
         val st = r.steps[min(stepIdx, r.steps.size - 1)]
         val dist = max(0.0, r.cum[st.pointIdx] - along)
