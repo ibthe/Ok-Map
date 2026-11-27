@@ -1325,7 +1325,7 @@ class MainActivity : AppCompatActivity() {
                 typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
                 setTextColor(themeColor(if (on) R.attr.gOnAccent else R.attr.gTextPrimary))
                 gravity = Gravity.CENTER_VERTICAL
-                minimumHeight = dp(44)
+                minimumHeight = dp(48)
                 setPadding(dp(14), 0, dp(14), dp(3))
                 background = Skin.chip(this@MainActivity, uiOpacity())
                 Skin.shape(this, false, 28f, uiOpacity())
@@ -1349,7 +1349,7 @@ class MainActivity : AppCompatActivity() {
                     buildChips()
                 }
             }
-            row.addView(chip, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(47)).apply { marginEnd = dp(8) })
+            row.addView(chip, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(48)).apply { marginEnd = dp(8) })
         }
     }
 
@@ -1448,7 +1448,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(label(name, 22f, R.attr.gTextPrimary, true))
         root.addView(label(Geo.fmtCoord(ll.latitude, ll.longitude), 14f, R.attr.gTextSecondary)
             .apply { setPadding(0, dp(4), 0, 0); typeface = android.graphics.Typeface.MONOSPACE })
-        val me = myLoc
+        val me = myLoc?.takeIf { isFreshLocation(it) }
         if (me != null) {
             val d = Graph.haversine(me.latitude, me.longitude, ll.latitude, ll.longitude)
             val b = Compass.bearing(me.latitude, me.longitude, ll.latitude, ll.longitude)
@@ -1738,6 +1738,10 @@ class MainActivity : AppCompatActivity() {
         } else sb.append("map.mbtiles: нет\n")
         sb.append("places.db: ").append(placeDb?.count()?.toString() ?: "нет").append(" мест\n")
         sb.append("relief: ").append(if (elevation != null) "есть" else "нет").append("\n")
+        val graphFile = File(filesDir, "graph.bin")
+        sb.append("дорожный граф: ").append(if (graphFile.exists()) "${graphFile.length() shr 20} МБ" else "нет").append("\n")
+        val contoursFile = File(filesDir, "contours.mbtiles")
+        sb.append("горизонтали: ").append(if (contoursFile.exists()) "${contoursFile.length() shr 20} МБ" else "нет").append("\n")
         val satFile = File(filesDir, "sat.mbtiles")
         sb.append("спутниковые снимки: ").append(
             if (satFile.exists()) "${satFile.length() shr 20} МБ, zoom от ${mbtilesMinZoom(satFile)}"
