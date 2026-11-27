@@ -261,3 +261,20 @@ reversed_data = bg.build(multi_ways, min_component=1,
                          via_way_restrictions=[(110, (130, 120), 140, "no_straight_on")])
 assert not reversed_data["sequence_restrictions"], "via-way member order was ignored"
 print("multiple ordered via-way members and order-sensitive resolution tests passed")
+
+
+# High-latitude grid search: longitude cells shrink with cos(latitude), so a
+# height-only stopping radius can miss a closer road two columns away.
+snap_ways = [
+    ({"highway": "residential"}, [(5001, 41.7324, 44.7990), (5002, 41.7326, 44.7990)], 501),
+    ({"highway": "residential"}, [(5003, 41.7324, 44.8101), (5004, 41.7326, 44.8101)], 502),
+    # This remote component shifts the grid origin without becoming a nearby candidate.
+    ({"highway": "residential"}, [(5005, 42.0000, 44.7900), (5006, 42.0010, 44.7900)], 503),
+]
+snap_data = bg.build(snap_ways, min_component=1, cell=5000)
+snap_path = os.path.join(tempfile.mkdtemp(), "latitude-snap.bin")
+bg.write(snap_data, snap_path)
+snap_graph = rc.Graph(snap_path)
+latitude_snap = snap_graph.snap(41.7325, 44.8049)
+assert latitude_snap[1] == 1, ("latitude-aware grid search missed the closer road", latitude_snap)
+print("latitude-aware road snapping test passed")
