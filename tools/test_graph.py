@@ -312,12 +312,13 @@ print("graph v3 ordered via-way no_/only_ routing tests passed")
 v2_raw = bytearray(open(p, "rb").read())
 struct.pack_into("<i", v2_raw, 4, 2)
 v2_path = os.path.join(tempfile.mkdtemp(), "legacy-v2.bin")
-open(v2_path, "wb").write(v2_raw[:-4])
+open(v2_path, "wb").write(v2_raw[:-8])  # omit sequence and conditional sections
 v2_graph = rc.Graph(v2_path)
 assert v2_graph.version == 2 and not v2_graph.ac_bad[0]
 
 # v3 rejects malformed sequence records.
-bad_seq = bytearray(open(no_via_path, "rb").read())
+bad_seq = bytearray(open(no_via_path, "rb").read()[:-4])  # strip v4 conditional count to form v3
+struct.pack_into("<i", bad_seq, 4, 3)
 bad_seq[-4:] = struct.pack("<i", -1)
 bad_seq_path = os.path.join(tempfile.mkdtemp(), "bad-sequence-v3.bin")
 open(bad_seq_path, "wb").write(bad_seq)
