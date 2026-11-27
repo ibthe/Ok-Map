@@ -9,6 +9,10 @@ on:
         description: "Optional: direct link to a .osm.pbf of Georgia (country) if automatic download fails"
         required: false
         default: ""
+      map_data_revision:
+        description: "Optional: change this value to force rebuilding cached OSM map data (for example, 2026-11)"
+        required: false
+        default: ""
       sat_url:
         description: "Optional: direct URL of a raster satellite imagery .mbtiles (leave empty for the stylised satellite view)"
         required: false
@@ -78,8 +82,10 @@ jobs:
         with:
           path: |
             app/src/main/assets/map.mbtiles
+            app/src/main/assets/map.stamp
             app/src/main/assets/places.db
             app/src/main/assets/relief.mbtiles
+            app/src/main/assets/relief.stamp
             app/src/main/assets/places.stamp
             app/src/main/assets/graph.bin
             app/src/main/assets/graph.stamp
@@ -130,10 +136,20 @@ jobs:
       # decided once, before anything is built (a file check per step would change mid-run)
       - name: Decide what has to be rebuilt
         id: need
+        env:
+          OSM_URL: ${{ inputs.osm_url || '' }}
+          MAP_DATA_REVISION: ${{ inputs.map_data_revision || 'default' }}
         run: |
           mkdir -p app/src/main/assets
-          [ -s app/src/main/assets/map.mbtiles ] || { echo "tiles=true" >> "$GITHUB_OUTPUT"; echo "places=true" >> "$GITHUB_OUTPUT"; }
+          # Cache restore-keys can restore an older map after a builder/source cache miss.
+          # Explicit stamps make sure stale map/relief assets are actually rebuilt.
+          MH=$(printf '%s|%s|%s' "$(cat tools/fetch_osm.py tools/finalize_tiles.py tools/check_tiles.py tools/mvt.py | sha256sum)" "$OSM_URL" "$MAP_DATA_REVISION" | sha256sum | cut -d' ' -f1)
+          echo "$MH" > /tmp/map.stamp
+          [ -s app/src/main/assets/map.mbtiles ] && [ "$(cat app/src/main/assets/map.stamp 2>/dev/null)" = "$MH" ] || { echo "tiles=true" >> "$GITHUB_OUTPUT"; echo "places=true" >> "$GITHUB_OUTPUT"; }
           [ -s app/src/main/assets/places.db ] || echo "places=true" >> "$GITHUB_OUTPUT"
+          RH=$(cat tools/build_relief.py | sha256sum | cut -d' ' -f1)
+          echo "$RH" > /tmp/relief.stamp
+          [ -s app/src/main/assets/relief.mbtiles ] && [ "$(cat app/src/main/assets/relief.stamp 2>/dev/null)" = "$RH" ] || echo "relief=true" >> "$GITHUB_OUTPUT"
           PH=$(cat tools/build_places.py tools/mvt.py tools/reference_places.json | sha1sum | cut -d' ' -f1)
           echo "$PH" > /tmp/places.stamp
           [ "$(cat app/src/main/assets/places.stamp 2>/dev/null)" = "$PH" ] || echo "places=true" >> "$GITHUB_OUTPUT"
@@ -198,6 +214,7 @@ jobs:
         run: |
           python finalize_tiles.py ../app/src/main/assets/map.mbtiles
           python check_tiles.py ../app/src/main/assets/map.mbtiles
+          cp /tmp/map.stamp ../app/src/main/assets/map.stamp
 
       - name: Build offline search index
         if: steps.need.outputs.places == 'true'
@@ -235,7 +252,9 @@ jobs:
         if: steps.need.outputs.relief == 'true'
         continue-on-error: true
         working-directory: tools
-        run: python build_relief.py ../app/src/main/assets/relief.mbtiles
+        run: |
+          python build_relief.py ../app/src/main/assets/relief.mbtiles
+          cp /tmp/relief.stamp app/src/main/assets/relief.stamp
 
       # Contour lines for the "Высоты" map type, computed from the relief DEM. Optional: the APK builds without them.
       - name: Build contour lines (elevation map type)
