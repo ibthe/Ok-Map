@@ -58,21 +58,29 @@ def car_restriction_kind(tags):
 
 
 def parse_via_way_members(members):
-    """Parse an ordered OSM restriction member list containing one or more via-ways.
-
-    members is an iterable of (role, member_type, ref) triples in relation order.
-    Mixed via-node/via-way relations are deliberately rejected until their topology
-    can be resolved without guessing.
-    """
-    from_ways = [int(ref) for role, typ, ref in members if role == "from" and typ == "w"]
-    to_ways = [int(ref) for role, typ, ref in members if role == "to" and typ == "w"]
+    """Parse an ordered OSM restriction with exactly one from/to way and one or more via-ways."""
+    from_members = [(typ, int(ref)) for role, typ, ref in members if role == "from"]
+    to_members = [(typ, int(ref)) for role, typ, ref in members if role == "to"]
     via_members = [(typ, int(ref)) for role, typ, ref in members if role == "via"]
-    if len(from_ways) != 1 or len(to_ways) != 1 or not via_members:
+    if (len(from_members) != 1 or from_members[0][0] != "w" or
+            len(to_members) != 1 or to_members[0][0] != "w" or not via_members):
         return None
     if any(typ != "w" for typ, _ in via_members):
         return None
     # A relation may list multiple via ways. Their order is semantically significant.
-    return (from_ways[0], tuple(ref for _, ref in via_members), to_ways[0])
+    return (from_members[0][1], tuple(ref for _, ref in via_members), to_members[0][1])
+
+
+def parse_via_node_members(members):
+    """Parse a via-node restriction only when all three required member roles are exact."""
+    from_members = [(typ, int(ref)) for role, typ, ref in members if role == "from"]
+    via_members = [(typ, int(ref)) for role, typ, ref in members if role == "via"]
+    to_members = [(typ, int(ref)) for role, typ, ref in members if role == "to"]
+    if (len(from_members) != 1 or from_members[0][0] != "w" or
+            len(via_members) != 1 or via_members[0][0] != "n" or
+            len(to_members) != 1 or to_members[0][0] != "w"):
+        return None
+    return (from_members[0][1], via_members[0][1], to_members[0][1])
 
 
 def haversine(la1, lo1, la2, lo2):
@@ -476,14 +484,9 @@ def read_pbf(path):
             if parsed_via is not None:
                 self.via_way_restrictions.append((*parsed_via, kind))
                 return
-            # Existing via-node relations remain supported. Do not reinterpret mixed
-            # or malformed via-way relations as node restrictions.
-            via_nodes = [ref for role, typ, ref in ordered if role == "via" and typ == "n"]
-            from_ways = [ref for role, typ, ref in ordered if role == "from" and typ == "w"]
-            to_ways = [ref for role, typ, ref in ordered if role == "to" and typ == "w"]
-            if len(from_ways) == 1 and len(via_nodes) == 1 and len(to_ways) == 1:
-                if not any(role == "via" and typ == "w" for role, typ, _ in ordered):
-                    self.restrictions.append((from_ways[0], via_nodes[0], to_ways[0], kind))
+            parsed_node = parse_via_node_members(ordered)
+            if parsed_node is not None:
+                self.restrictions.append((*parsed_node, kind))
 
     h = H()
     h.apply_file(path, locations=True)
