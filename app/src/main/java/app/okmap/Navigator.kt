@@ -159,7 +159,7 @@ class Navigator(
                     sd = s.dist; ed = e.dist
                     val legs = g.route(s, e, avoid)
                     if (legs == null) error = "Маршрут не найден: дороги в этих местах не связаны"
-                    else result = g.buildRoute(legs)
+                    else result = g.buildRoute(legs, avoid)
                 }
             } catch (ex: Exception) {
                 error = "Ошибка маршрута: ${ex.message}"
