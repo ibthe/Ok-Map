@@ -14,14 +14,14 @@ import kotlin.math.ln
 import kotlin.math.tan
 
 /** Waypoints and recorded tracks (private, on-device). */
-class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 2) {
+class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 3) {
 
     companion object {
         const val DEFAULT_FOLDER = "Избранное"
     }
 
     data class Wpt(val id: Long, val name: String, val lat: Double, val lon: Double, val folder: String)
-    data class Pt(val lat: Double, val lon: Double, val ele: Double, val ts: Long)
+    data class Pt(val lat: Double, val lon: Double, val ele: Double, val ts: Long, val segment: Int = 0)
     data class Track(val id: Long, val name: String, val start: Long, val count: Int)
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -30,7 +30,7 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 2) {
         db.execSQL("create table waypoints(id integer primary key autoincrement, name text, lat real, lon real, ts integer, folder text not null default '$DEFAULT_FOLDER')")
         db.execSQL("create index waypoints_folder_idx on waypoints(folder)")
         db.execSQL("create table tracks(id integer primary key autoincrement, name text, start integer)")
-        db.execSQL("create table track_points(id integer primary key autoincrement, track_id integer, ts integer, lat real, lon real, ele real)")
+        db.execSQL("create table track_points(id integer primary key autoincrement, track_id integer, ts integer, lat real, lon real, ele real, segment integer not null default 0)")
         db.execSQL("create index tp_idx on track_points(track_id)")
     }
 
@@ -40,6 +40,9 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 2) {
             db.execSQL("insert or ignore into folders(name) values('$DEFAULT_FOLDER')")
             db.execSQL("alter table waypoints add column folder text not null default '$DEFAULT_FOLDER'")
             db.execSQL("create index if not exists waypoints_folder_idx on waypoints(folder)")
+        }
+        if (o < 3) {
+            db.execSQL("alter table track_points add column segment integer not null default 0")
         }
     }
 
@@ -148,9 +151,10 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 2) {
         return writableDatabase.insert("tracks", null, v)
     }
 
-    fun addPoint(trackId: Long, lat: Double, lon: Double, ele: Double, ts: Long) {
+    fun addPoint(trackId: Long, lat: Double, lon: Double, ele: Double, ts: Long, segment: Int = 0) {
         val v = ContentValues()
         v.put("track_id", trackId); v.put("ts", ts); v.put("lat", lat); v.put("lon", lon)
+        v.put("segment", segment.coerceAtLeast(0))
         if (!ele.isNaN()) v.put("ele", ele)
         writableDatabase.insert("track_points", null, v)
     }
@@ -176,6 +180,7 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 2) {
             for (p in pts) {
                 val v = ContentValues()
                 v.put("track_id", trackId); v.put("ts", p.ts); v.put("lat", p.lat); v.put("lon", p.lon)
+                v.put("segment", p.segment.coerceAtLeast(0))
                 if (!p.ele.isNaN()) v.put("ele", p.ele)
                 db.insert("track_points", null, v)
             }
@@ -199,10 +204,10 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 2) {
     fun trackPoints(id: Long): List<Pt> {
         val out = ArrayList<Pt>()
         readableDatabase.rawQuery(
-            "select lat,lon,ele,ts from track_points where track_id=? order by id", arrayOf(id.toString())
+            "select lat,lon,ele,ts,segment from track_points where track_id=? order by id", arrayOf(id.toString())
         ).use { c ->
             while (c.moveToNext()) {
-                out.add(Pt(c.getDouble(0), c.getDouble(1), if (c.isNull(2)) Double.NaN else c.getDouble(2), c.getLong(3)))
+                out.add(Pt(c.getDouble(0), c.getDouble(1), if (c.isNull(2)) Double.NaN else c.getDouble(2), c.getLong(3), c.getInt(4)))
             }
         }
         return out
@@ -211,10 +216,10 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 2) {
     /** Stream track points in database order without materializing a potentially huge track in memory. */
     fun forEachTrackPoint(id: Long, action: (Pt) -> Unit) {
         readableDatabase.rawQuery(
-            "select lat,lon,ele,ts from track_points where track_id=? order by id", arrayOf(id.toString())
+            "select lat,lon,ele,ts,segment from track_points where track_id=? order by id", arrayOf(id.toString())
         ).use { c ->
             while (c.moveToNext()) {
-                action(Pt(c.getDouble(0), c.getDouble(1), if (c.isNull(2)) Double.NaN else c.getDouble(2), c.getLong(3)))
+                action(Pt(c.getDouble(0), c.getDouble(1), if (c.isNull(2)) Double.NaN else c.getDouble(2), c.getLong(3), c.getInt(4)))
             }
         }
     }
