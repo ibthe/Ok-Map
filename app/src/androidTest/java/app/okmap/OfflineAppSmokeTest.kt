@@ -8,6 +8,7 @@ import android.view.LayoutInflater
 import android.util.AttributeSet
 import android.content.Context
 import android.view.View
+import android.view.ContextThemeWrapper
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
@@ -110,7 +111,11 @@ class OfflineAppSmokeTest {
             try {
                 // Replace only the MapLibre rendering surface with a plain View. This test
                 // measures the Android layout geometry, not the native renderer lifecycle.
-                val inflater = LayoutInflater.from(context).cloneInContext(context)
+                // Application targetContext does not automatically apply the activity theme.
+                // EditText resolves Material3 and app-defined attributes during construction,
+                // so inflate with the same explicit theme used by MainActivity.
+                val themedContext = ContextThemeWrapper(context, R.style.Theme_OkMap)
+                val inflater = LayoutInflater.from(themedContext).cloneInContext(themedContext)
                 inflater.setFactory2(object : LayoutInflater.Factory2 {
                     override fun onCreateView(
                         parent: View?, name: String, ctx: Context, attrs: AttributeSet
