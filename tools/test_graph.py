@@ -126,6 +126,16 @@ assert bg.car_restriction_kind({"type": "restriction", "restriction": "only_stra
 assert bg.car_restriction_kind({"type": "restriction", "restriction": "no_entry"}) == "no_entry"
 assert bg.car_restriction_kind({"type": "restriction", "restriction": "no_exit"}) == "no_exit"
 
+# Conditional restrictions: supported weekday ranges and same-day time windows.
+assert bg.parse_conditional_restrictions(
+    "no_left_turn @ (Mo-Fr 07:00-09:00)"
+) == [("no_left_turn", 0b0011111, 420, 540)]
+assert bg.parse_conditional_restrictions(
+    "no_entry @ (Sa-Su); no_exit @ (07:30-08:45)"
+) == [("no_entry", 0b1100000, 0, 1440), ("no_exit", 0b1111111, 450, 525)]
+assert bg.parse_conditional_restrictions("no_left_turn @ (PH 07:00-09:00)") == []
+assert bg.parse_conditional_restrictions("no_left_turn @ (Mo-Fr 22:00-02:00)") == []
+
 # The Python reader accepts legacy v1/v2 graphs, but rejects malformed v2 tails.
 legacy_raw = bytearray(open(p, "rb").read())
 assert struct.unpack_from("<i", legacy_raw, 4)[0] == 3
@@ -222,6 +232,13 @@ exit_pairs = bg.parse_via_node_member_pairs([
 exit_data = bg.build(multi_ways, min_component=1,
                      restrictions=[(*pair, "no_exit") for pair in exit_pairs])
 assert exit_data["turn_restrictions"].shape[0] == 2, exit_data["turn_restrictions"]
+
+conditional_data = bg.build(
+    multi_ways, min_component=1,
+    conditional_restrictions=[(10, 502, 20, "no_left_turn", 0b0011111, 420, 540)]
+)
+assert conditional_data["conditional_turn_restrictions"].shape == (2, 5), conditional_data["conditional_turn_restrictions"]
+assert set(conditional_data["conditional_turn_restrictions"][:, 2]) == {0b0011111}
 # Unknown roles must invalidate the whole relation instead of being silently discarded.
 assert bg.parse_via_way_members([
     ("from", "w", 100), ("via", "w", 200), ("to", "w", 400), ("location_hint", "n", 999)
