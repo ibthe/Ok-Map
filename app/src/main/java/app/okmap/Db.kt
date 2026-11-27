@@ -14,31 +14,126 @@ import kotlin.math.ln
 import kotlin.math.tan
 
 /** Waypoints and recorded tracks (private, on-device). */
-class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 1) {
+class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 2) {
 
-    data class Wpt(val id: Long, val name: String, val lat: Double, val lon: Double)
+    companion object {
+        const val DEFAULT_FOLDER = "Избранное"
+    }
+
+    data class Wpt(val id: Long, val name: String, val lat: Double, val lon: Double, val folder: String)
     data class Pt(val lat: Double, val lon: Double, val ele: Double, val ts: Long)
     data class Track(val id: Long, val name: String, val start: Long, val count: Int)
 
     override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("create table waypoints(id integer primary key autoincrement, name text, lat real, lon real, ts integer)")
+        db.execSQL("create table folders(name text primary key)")
+        db.execSQL("insert into folders(name) values('$DEFAULT_FOLDER')")
+        db.execSQL("create table waypoints(id integer primary key autoincrement, name text, lat real, lon real, ts integer, folder text not null default '$DEFAULT_FOLDER')")
+        db.execSQL("create index waypoints_folder_idx on waypoints(folder)")
         db.execSQL("create table tracks(id integer primary key autoincrement, name text, start integer)")
         db.execSQL("create table track_points(id integer primary key autoincrement, track_id integer, ts integer, lat real, lon real, ele real)")
         db.execSQL("create index tp_idx on track_points(track_id)")
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, o: Int, n: Int) {}
+    override fun onUpgrade(db: SQLiteDatabase, o: Int, n: Int) {
+        if (o < 2) {
+            db.execSQL("create table if not exists folders(name text primary key)")
+            db.execSQL("insert or ignore into folders(name) values('$DEFAULT_FOLDER')")
+            db.execSQL("alter table waypoints add column folder text not null default '$DEFAULT_FOLDER'")
+            db.execSQL("create index if not exists waypoints_folder_idx on waypoints(folder)")
+        }
+    }
 
-    fun addWaypoint(name: String, lat: Double, lon: Double): Long {
+    fun folders(): List<String> {
+        val out = ArrayList<String>()
+        readableDatabase.rawQuery(
+            "select name from folders order by case when name=? then 0 else 1 end, name collate nocase",
+            arrayOf(DEFAULT_FOLDER)
+        ).use { c -> while (c.moveToNext()) out.add(c.getString(0)) }
+        if (out.isEmpty()) out.add(DEFAULT_FOLDER)
+        return out
+    }
+
+    fun waypointCount(folder: String): Int =
+        readableDatabase.rawQuery("select count(*) from waypoints where folder=?", arrayOf(folder))
+            .use { if (it.moveToFirst()) it.getInt(0) else 0 }
+
+    fun createFolder(name: String): Boolean {
+        val normalized = name.trim().take(40)
+        if (normalized.isBlank() || normalized == DEFAULT_FOLDER) return false
+        val values = ContentValues().apply { put("name", normalized) }
+        return writableDatabase.insertWithOnConflict("folders", null, values, SQLiteDatabase.CONFLICT_IGNORE) != -1L
+    }
+
+    fun ensureFolder(name: String): String {
+        val normalized = name.trim().take(40).ifBlank { DEFAULT_FOLDER }
+        val values = ContentValues().apply { put("name", normalized) }
+        writableDatabase.insertWithOnConflict("folders", null, values, SQLiteDatabase.CONFLICT_IGNORE)
+        return normalized
+    }
+
+    fun renameFolder(oldName: String, newName: String): Boolean {
+        val old = oldName.trim()
+        val new = newName.trim().take(40)
+        if (old == DEFAULT_FOLDER || new.isBlank() || new == DEFAULT_FOLDER) return false
+        if (old == new) return true
+        val db = writableDatabase
+        db.beginTransaction()
+        return try {
+            val folderValues = ContentValues().apply { put("name", new) }
+            val changed = db.update("folders", folderValues, "name=?", arrayOf(old))
+            if (changed == 0) false else {
+                val waypointValues = ContentValues().apply { put("folder", new) }
+                db.update("waypoints", waypointValues, "folder=?", arrayOf(old))
+                db.setTransactionSuccessful()
+                true
+            }
+        } catch (_: Exception) {
+            false
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun deleteFolder(name: String): Boolean {
+        val folder = name.trim()
+        if (folder == DEFAULT_FOLDER) return false
+        val db = writableDatabase
+        db.beginTransaction()
+        return try {
+            val values = ContentValues().apply { put("folder", DEFAULT_FOLDER) }
+            db.update("waypoints", values, "folder=?", arrayOf(folder))
+            val deleted = db.delete("folders", "name=?", arrayOf(folder)) > 0
+            db.setTransactionSuccessful()
+            deleted
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun moveWaypoint(id: Long, folder: String): Boolean {
+        val target = ensureFolder(folder)
+        val values = ContentValues().apply { put("folder", target) }
+        return writableDatabase.update("waypoints", values, "id=?", arrayOf(id.toString())) > 0
+    }
+
+    fun addWaypoint(name: String, lat: Double, lon: Double, folder: String = DEFAULT_FOLDER): Long {
         val v = ContentValues()
         v.put("name", name); v.put("lat", lat); v.put("lon", lon); v.put("ts", System.currentTimeMillis())
+        v.put("folder", ensureFolder(folder))
         return writableDatabase.insert("waypoints", null, v)
     }
 
-    fun waypoints(): List<Wpt> {
+    fun waypoints(folder: String? = null): List<Wpt> {
         val out = ArrayList<Wpt>()
-        readableDatabase.rawQuery("select id,name,lat,lon from waypoints order by id", null).use { c ->
-            while (c.moveToNext()) out.add(Wpt(c.getLong(0), c.getString(1) ?: "", c.getDouble(2), c.getDouble(3)))
+        val sql = if (folder == null)
+            "select id,name,lat,lon,folder from waypoints order by id"
+        else
+            "select id,name,lat,lon,folder from waypoints where folder=? order by id"
+        readableDatabase.rawQuery(sql, if (folder == null) null else arrayOf(folder)).use { c ->
+            while (c.moveToNext()) out.add(Wpt(
+                c.getLong(0), c.getString(1) ?: "", c.getDouble(2), c.getDouble(3),
+                c.getString(4) ?: DEFAULT_FOLDER
+            ))
         }
         return out
     }

@@ -32,6 +32,8 @@ import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import android.widget.BaseAdapter
 import android.widget.EditText
+import android.widget.ArrayAdapter
+import android.widget.Spinner
 import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
@@ -1477,6 +1479,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 2 -> {   // MY PLACES: points, tracks, files; recording is available from the persistent map dock
                     add(menuRow("Мои точки", "${userDb.waypoints().size}", null, act { showWaypoints() }))
+                    add(menuRow("Папки мест", "${userDb.folders().size}", "Избранное, категории и собственные папки", act { showFolderManager() }))
                     add(menuRow("Мои треки", "${userDb.tracks().size}", "Записанные пути", act { showTracks() }))
                     add(menuRow("Экспорт GPX", null, "Сохранить точки и треки в файл", act {
                         exportLauncher.launch("okmap-" + SimpleDateFormat("yyyyMMdd", Locale.US).format(Date()) + ".gpx")
@@ -1839,31 +1842,140 @@ class MainActivity : AppCompatActivity() {
     // ============================================================ waypoints
 
     private fun addWaypointDialog(ll: LatLng) {
-        val et = EditText(this)
-        et.setText("Точка ${userDb.waypoints().size + 1}")
-        et.setSelectAllOnFocus(true)
+        val folders = userDb.folders()
+        val et = EditText(this).apply {
+            setText("Точка ${userDb.waypoints().size + 1}")
+            setSelectAllOnFocus(true)
+            hint = "Название точки"
+        }
+        val spinner = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, folders).also {
+                it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            setSelection(folders.indexOf(UserDb.DEFAULT_FOLDER).coerceAtLeast(0))
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
+            addView(et)
+            addView(label("Папка", 13f, R.attr.gTextSecondary, true).apply { setPadding(0, dp(8), 0, 0) })
+            addView(spinner)
+        }
         MaterialAlertDialogBuilder(this)
             .setTitle("Сохранить точку\n" + Geo.fmtCoord(ll.latitude, ll.longitude))
-            .setView(et)
+            .setView(content)
             .setPositiveButton("Сохранить") { _, _ ->
-                userDb.addWaypoint(et.text.toString().ifBlank { "Точка" }, ll.latitude, ll.longitude)
+                userDb.addWaypoint(
+                    et.text.toString().ifBlank { "Точка" }, ll.latitude, ll.longitude,
+                    spinner.selectedItem?.toString() ?: UserDb.DEFAULT_FOLDER
+                )
                 refreshWaypoints()
             }
             .setNegativeButton("Отмена", null).show()
     }
 
     private fun showWaypoints() {
-        val list = userDb.waypoints()
-        if (list.isEmpty()) { toast("Точек нет. Долгое нажатие на карту или кнопка «Точка»"); return }
+        val folders = userDb.folders()
+        val items = folders.map { "$it · ${userDb.waypointCount(it)}" }.toTypedArray()
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Папки мест")
+            .setItems(items) { _, index -> showWaypointsInFolder(folders[index]) }
+            .setPositiveButton("Новая папка") { _, _ -> createFolderDialog() }
+            .setNeutralButton("Все точки") { _, _ -> showWaypointsInFolder(null) }
+            .show()
+    }
+
+    private fun showWaypointsInFolder(folder: String?) {
+        val list = userDb.waypoints(folder)
+        val title = folder ?: "Все точки"
+        if (list.isEmpty()) {
+            MaterialAlertDialogBuilder(this).setTitle(title).setMessage("В этой папке пока нет точек.")
+                .setPositiveButton("Закрыть", null)
+                .setNeutralButton("Папки") { _, _ -> showWaypoints() }.show()
+            return
+        }
         val items = list.map { "${it.name}\n${Geo.fmtCoord(it.lat, it.lon)}" }.toTypedArray()
-        MaterialAlertDialogBuilder(this).setTitle("Мои точки").setItems(items) { _, i ->
-            val w = list[i]
-            MaterialAlertDialogBuilder(this).setTitle(w.name)
-                .setItems(arrayOf("Перейти", "Удалить")) { _, a ->
-                    if (a == 0) flyTo(w.lat, w.lon, 15.0)
-                    else { userDb.deleteWaypoint(w.id); refreshWaypoints() }
-                }.show()
+        MaterialAlertDialogBuilder(this).setTitle(title).setItems(items) { _, index ->
+            val waypoint = list[index]
+            MaterialAlertDialogBuilder(this).setTitle(waypoint.name)
+                .setItems(arrayOf("Перейти", "Переместить в папку", "Удалить")) { _, action ->
+                    when (action) {
+                        0 -> flyTo(waypoint.lat, waypoint.lon, 15.0)
+                        1 -> moveWaypointDialog(waypoint)
+                        2 -> {
+                            userDb.deleteWaypoint(waypoint.id)
+                            refreshWaypoints()
+                            showWaypointsInFolder(folder)
+                        }
+                    }
+                }
+                .setNeutralButton("Папки") { _, _ -> showWaypoints() }
+                .show()
+        }.setNeutralButton("Папки") { _, _ -> showWaypoints() }.show()
+    }
+
+    private fun showFolderManager() {
+        val folders = userDb.folders()
+        val items = folders.map { "$it · ${userDb.waypointCount(it)}" }.toTypedArray()
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Управление папками")
+            .setItems(items) { _, index -> showFolderActions(folders[index]) }
+            .setPositiveButton("Создать") { _, _ -> createFolderDialog() }
+            .setNegativeButton("Закрыть", null)
+            .show()
+    }
+
+    private fun showFolderActions(folder: String) {
+        val options = if (folder == UserDb.DEFAULT_FOLDER)
+            arrayOf("Открыть")
+        else
+            arrayOf("Открыть", "Переименовать", "Удалить")
+        MaterialAlertDialogBuilder(this).setTitle(folder).setItems(options) { _, action ->
+            when (options[action]) {
+                "Открыть" -> showWaypointsInFolder(folder)
+                "Переименовать" -> renameFolderDialog(folder)
+                "Удалить" -> MaterialAlertDialogBuilder(this)
+                    .setTitle("Удалить папку «$folder»?")
+                    .setMessage("Сохранённые точки будут перемещены в папку «Избранное».")
+                    .setNegativeButton("Отмена", null)
+                    .setPositiveButton("Удалить") { _, _ ->
+                        userDb.deleteFolder(folder)
+                        refreshWaypoints()
+                        showFolderManager()
+                    }.show()
+            }
         }.show()
+    }
+
+    private fun createFolderDialog() {
+        val input = EditText(this).apply { hint = "Название папки" }
+        MaterialAlertDialogBuilder(this).setTitle("Новая папка").setView(input)
+            .setNegativeButton("Отмена", null)
+            .setPositiveButton("Создать") { _, _ ->
+                if (userDb.createFolder(input.text.toString())) showFolderManager()
+                else toast("Папка с таким названием уже есть или название пустое")
+            }.show()
+    }
+
+    private fun renameFolderDialog(folder: String) {
+        val input = EditText(this).apply { setText(folder); setSelectAllOnFocus(true) }
+        MaterialAlertDialogBuilder(this).setTitle("Переименовать папку").setView(input)
+            .setNegativeButton("Отмена", null)
+            .setPositiveButton("Сохранить") { _, _ ->
+                if (userDb.renameFolder(folder, input.text.toString())) showFolderManager()
+                else toast("Не удалось переименовать папку")
+            }.show()
+    }
+
+    private fun moveWaypointDialog(waypoint: UserDb.Wpt) {
+        val folders = userDb.folders().filter { it != waypoint.folder }
+        if (folders.isEmpty()) { toast("Нет других папок"); return }
+        MaterialAlertDialogBuilder(this).setTitle("Переместить точку")
+            .setItems(folders.toTypedArray()) { _, index ->
+                userDb.moveWaypoint(waypoint.id, folders[index])
+                refreshWaypoints()
+                showWaypointsInFolder(folders[index])
+            }.show()
     }
 
     private fun flyTo(lat: Double, lon: Double, zoom: Double) {
@@ -1912,9 +2024,9 @@ class MainActivity : AppCompatActivity() {
         val list = userDb.tracks()
         if (list.isEmpty()) { toast("Треков пока нет"); return }
         val fmt = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
+        // Avoid loading every recorded track's full geometry just to draw the list.
         val items = list.map {
-            val len = Geo.length(userDb.trackLatLng(it.id))
-            "${it.name}\n${fmt.format(Date(it.start))} · ${it.count} точек · ${Geo.fmtDist(len)}"
+            "${it.name}\n${fmt.format(Date(it.start))} · ${it.count} точек"
         }.toTypedArray()
         MaterialAlertDialogBuilder(this).setTitle("Мои треки").setItems(items) { _, i ->
             val t = list[i]
@@ -2043,7 +2155,7 @@ class MainActivity : AppCompatActivity() {
             sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
             sb.append("<gpx version=\"1.1\" creator=\"Ok Map\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n")
             for (w in userDb.waypoints()) {
-                sb.append("<wpt lat=\"${w.lat}\" lon=\"${w.lon}\"><name>${esc(w.name)}</name></wpt>\n")
+                sb.append("<wpt lat=\"${w.lat}\" lon=\"${w.lon}\"><name>${esc(w.name)}</name><type>${esc(w.folder)}</type></wpt>\n")
             }
             for (t in userDb.tracks()) {
                 sb.append("<trk><name>${esc(t.name)}</name><trkseg>\n")
@@ -2078,6 +2190,7 @@ class MainActivity : AppCompatActivity() {
                 var ele = Double.NaN
                 var ts = 0L
                 var name = ""
+                var wptFolder = UserDb.DEFAULT_FOLDER
                 var trkName = "Импорт GPX"
                 val pts = ArrayList<UserDb.Pt>()
                 val segments = ArrayList<List<UserDb.Pt>>()
@@ -2085,17 +2198,18 @@ class MainActivity : AppCompatActivity() {
                 while (ev != XmlPullParser.END_DOCUMENT) {
                     if (ev == XmlPullParser.START_TAG) {
                         when (p.name) {
-                            "wpt" -> { inWpt = true; name = ""; lat = p.getAttributeValue(null, "lat").toDouble(); lon = p.getAttributeValue(null, "lon").toDouble() }
+                            "wpt" -> { inWpt = true; name = ""; wptFolder = UserDb.DEFAULT_FOLDER; lat = p.getAttributeValue(null, "lat").toDouble(); lon = p.getAttributeValue(null, "lon").toDouble() }
                             "trk" -> { inTrk = true; trkName = "Импорт GPX"; pts.clear(); segments.clear() }
                             "trkseg" -> pts.clear()
                             "trkpt" -> { inPt = true; ele = Double.NaN; ts = 0L; lat = p.getAttributeValue(null, "lat").toDouble(); lon = p.getAttributeValue(null, "lon").toDouble() }
                             "name" -> { val t = p.nextText(); if (inWpt) name = t else if (inTrk && !inPt) trkName = t }
+                            "type" -> { val t = p.nextText(); if (inWpt) wptFolder = t.ifBlank { UserDb.DEFAULT_FOLDER } }
                             "ele" -> { val t = p.nextText(); if (inPt) ele = t.toDoubleOrNull() ?: Double.NaN }
                             "time" -> { val t = p.nextText(); if (inPt) ts = parseGpxTime(t) }
                         }
                     } else if (ev == XmlPullParser.END_TAG) {
                         when (p.name) {
-                            "wpt" -> { userDb.addWaypoint(name.ifBlank { "Точка" }, lat, lon); inWpt = false; wpts++ }
+                            "wpt" -> { userDb.addWaypoint(name.ifBlank { "Точка" }, lat, lon, wptFolder); inWpt = false; wpts++ }
                             "trkpt" -> { pts.add(UserDb.Pt(lat, lon, ele, ts)); inPt = false }
                             "trkseg" -> { if (pts.isNotEmpty()) segments.add(pts.toList()); pts.clear() }
                             "trk" -> {
