@@ -176,6 +176,13 @@ assert bg.parse_via_node_members([
 assert bg.parse_via_node_members([
     ("from", "w", 100), ("via", "n", 250), ("via", "r", 251), ("to", "w", 400)
 ]) is None
+# Unknown roles must invalidate the whole relation instead of being silently discarded.
+assert bg.parse_via_way_members([
+    ("from", "w", 100), ("via", "w", 200), ("to", "w", 400), ("location_hint", "n", 999)
+]) is None
+assert bg.parse_via_node_members([
+    ("from", "w", 100), ("via", "n", 250), ("to", "w", 400), ("label", "n", 999)
+]) is None
 print("ordered via-way relation parsing tests passed")
 
 
