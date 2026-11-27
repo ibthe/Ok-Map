@@ -3,6 +3,8 @@ package app.okmap
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.Calendar
+import java.util.TimeZone
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import org.junit.Assert.assertEquals
@@ -11,7 +13,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GraphRoutingTest {
-    private fun syntheticGraph(): Pair<File, Double> {
+    private fun syntheticGraph(conditionalTurns: List<IntArray> = emptyList()): Pair<File, Double> {
         val aLat = 41.7000
         val aLon = 44.8000
         val bLat = 41.7000
@@ -24,10 +26,10 @@ class GraphRoutingTest {
         val trackDm = dm(aLat, aLon, bLat, bLon)
         val paved1Dm = dm(aLat, aLon, cLat, cLon)
         val paved2Dm = dm(cLat, cLon, bLat, bLon)
-        val bytes = ByteBuffer.allocate(240).order(ByteOrder.LITTLE_ENDIAN)
+        val bytes = ByteBuffer.allocate(244 + 20 * conditionalTurns.size).order(ByteOrder.LITTLE_ENDIAN)
 
         intArrayOf(
-            0x32474B4F, 3, 3, 3, 0, 6, 0, 0, 80,
+            0x32474B4F, 4, 3, 3, 0, 6, 0, 0, 80,
             41695000, 44795000, 5000, 1, 1, 0,
             0, 0, 0, 0, 0
         ).forEach { bytes.putInt(it) }
@@ -51,12 +53,44 @@ class GraphRoutingTest {
         bytes.putInt(0); bytes.putInt(0)                     // one empty grid cell
         bytes.putInt(0)                                      // no via-node restrictions
         bytes.putInt(0)                                      // no sequence restrictions
-        assertEquals(240, bytes.position())
+        bytes.putInt(conditionalTurns.size)
+        conditionalTurns.forEach { record ->
+            require(record.size == 5)
+            record.forEach { bytes.putInt(it) }
+        }
+        assertEquals(244 + 20 * conditionalTurns.size, bytes.position())
 
         val file = File.createTempFile("okmap-route-", ".bin")
         file.deleteOnExit()
         file.writeBytes(bytes.array())
         return file to trackDm / 10.0
+    }
+
+    @Test
+    fun conditionalTurnRestrictionActivatesOnlyDuringItsLocalSchedule() {
+        // Arc 2 is A->C on segment 1; arc 4 is C->B on segment 2.
+        val (file, trackLength) = syntheticGraph(listOf(intArrayOf(2, 4, 1, 420, 540)))
+        val graph = Graph(file)
+        val start = Snap(1, 0.0, 0.0, 41.7000, 44.8000)
+        val end = Snap(2, trackLength * 1.4, 0.0, 41.7000, 44.8100)
+
+        val zone = TimeZone.getTimeZone("Asia/Tbilisi")
+        val activeCalendar = Calendar.getInstance(zone).apply {
+            set(2026, Calendar.JANUARY, 5, 8, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val inactiveCalendar = Calendar.getInstance(zone).apply {
+            set(2026, Calendar.JANUARY, 5, 10, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+
+        val restricted = graph.route(start, end, avoidUnpaved = true, nowMillis = activeCalendar.timeInMillis)
+        val unrestricted = graph.route(start, end, avoidUnpaved = true, nowMillis = inactiveCalendar.timeInMillis)
+        assertNotNull(restricted)
+        assertNotNull(unrestricted)
+        assertTrue("scheduled turn must force the alternate connector", restricted!!.any { it.seg == 0 })
+        assertTrue("outside the schedule the paved path should remain available",
+            unrestricted!!.any { it.seg == 1 } && unrestricted.any { it.seg == 2 })
     }
 
     @Test
