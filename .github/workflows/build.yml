@@ -360,6 +360,20 @@ jobs:
       - name: Run Kotlin router unit tests
         run: gradle --no-daemon :app:testDebugUnitTest
 
+      # Exercise SQLite migrations, atomic user-data writes, offline manifest permissions,
+      # and first-launch map-data extraction on a real Android runtime.
+      - name: Run Android emulator smoke tests
+        uses: reactivecircus/android-emulator-runner@v2
+        timeout-minutes: 20
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: gradle --no-daemon :app:connectedDebugAndroidTest
+
       - name: Build Ok Map APK
         run: gradle --no-daemon -Pvcode=${{ github.run_number }} :app:assembleDebug
 
