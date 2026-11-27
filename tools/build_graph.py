@@ -528,15 +528,20 @@ DAY_INDEX = {"Mo": 0, "Tu": 1, "We": 2, "Th": 3, "Fr": 4, "Sa": 5, "Su": 6}
 
 
 def parse_conditional_restrictions(value):
-    """Parse the safe supported subset: weekday lists/ranges and same-day HH:MM ranges."""
+    """Parse only complete weekday/time rule sets; unsupported clauses reject the relation."""
+    if not value:
+        return []
     out = []
-    for clause in str(value or "").split(";"):
-        match = re.fullmatch(r"\s*([a-z_]+)\s*@\s*\(([^)]+)\)\s*", clause)
+    clauses = str(value).split(";")
+    for clause in clauses:
+        if not clause.strip():
+            return []
+        match = re.fullmatch(r"\\s*([a-z_]+)\\s*@\\s*\\(([^)]+)\\)\\s*", clause)
         if not match:
-            continue
+            return []
         kind, condition = match.group(1), match.group(2).strip()
         if kind not in NO_TURN_RESTRICTIONS | ONLY_TURN_RESTRICTIONS | MULTI_MEMBER_TURN_RESTRICTIONS:
-            continue
+            return []
 
         parts = condition.split()
         day_expr, time_expr = None, None
@@ -548,13 +553,12 @@ def parse_conditional_restrictions(value):
         elif len(parts) == 2:
             day_expr, time_expr = parts
         else:
-            continue
+            return []
 
         day_mask = 0
         if day_expr is None:
             day_mask = 0x7f
         else:
-            valid_days = True
             for item in day_expr.split(","):
                 endpoints = item.split("-")
                 if len(endpoints) == 1 and endpoints[0] in DAY_INDEX:
@@ -568,31 +572,29 @@ def parse_conditional_restrictions(value):
                             break
                         day = (day + 1) % 7
                 else:
-                    valid_days = False
-                    break
-            if not valid_days or not day_mask:
-                continue
+                    return []
+            if not day_mask:
+                return []
 
         start_minute, end_minute = 0, 1440
         if time_expr is not None:
             times = time_expr.split("-")
             if len(times) != 2:
-                continue
+                return []
             def minute(text, allow_24=False):
-                m = re.fullmatch(r"(\d{2}):(\d{2})", text)
+                m = re.fullmatch(r"(\\d{2}):(\\d{2})", text)
                 if not m:
                     return None
-                hour, minute = int(m.group(1)), int(m.group(2))
-                if minute > 59 or hour > (24 if allow_24 else 23) or (hour == 24 and (minute != 0 or not allow_24)):
+                hour, minute_value = int(m.group(1)), int(m.group(2))
+                if minute_value > 59 or hour > (24 if allow_24 else 23) or (hour == 24 and (minute_value != 0 or not allow_24)):
                     return None
-                return hour * 60 + minute
+                return hour * 60 + minute_value
             start_minute = minute(times[0])
             end_minute = minute(times[1], allow_24=True)
             if start_minute is None or end_minute is None or start_minute >= end_minute:
-                continue
+                return []
         out.append((kind, day_mask, start_minute, end_minute))
     return out
-
 
 def read_pbf(path):
     import osmium
@@ -604,6 +606,7 @@ def read_pbf(path):
             self.restrictions = []
             self.via_way_restrictions = []
             self.conditional_restrictions = []
+            self.unsupported_conditional = 0
 
         def way(self, w):
             if "highway" not in w.tags:
@@ -625,16 +628,26 @@ def read_pbf(path):
                                  tags.get("restriction:motor_vehicle:conditional") or
                                  tags.get("restriction:conditional"))
             kind = car_restriction_kind(tags)
-            # Mixed static + conditional relations keep their static restriction; we do not
-            # reinterpret the default rule as time-limited.
+            exceptions = {x.strip().lower() for x in re.split(r"[;,]", tags.get("except", "")) if x.strip()}
+            if exceptions & {"motorcar", "motor_vehicle", "vehicle"}:
+                return
+            # Mixed static + conditional relations keep the static restriction; the conditional
+            # override is deliberately not guessed because its default-rule semantics vary.
+            if conditional_value and kind is not None:
+                self.unsupported_conditional += 1
             conditional_rules = parse_conditional_restrictions(conditional_value) if kind is None else []
             if kind is None and not conditional_rules:
+                if conditional_value:
+                    self.unsupported_conditional += 1
                 return
             # Keep unsupported member types so malformed relations are rejected, not shortened.
             ordered = [(m.role, m.type, int(m.ref)) for m in r.members]
             if conditional_rules:
                 for conditional_kind, day_mask, start_minute, end_minute in conditional_rules:
                     parsed_nodes = parse_via_node_member_pairs(ordered, conditional_kind)
+                    if not parsed_nodes:
+                        self.unsupported_conditional += 1
+                        return
                     self.conditional_restrictions.extend(
                         (*pair, conditional_kind, day_mask, start_minute, end_minute) for pair in parsed_nodes
                     )
@@ -651,7 +664,8 @@ def read_pbf(path):
     h.apply_file(path, locations=True)
     print("routable ways:", len(h.ways), "via-node restrictions:", len(h.restrictions),
           "via-way restrictions detected:", len(h.via_way_restrictions),
-          "conditional via-node restrictions:", len(h.conditional_restrictions))
+          "conditional via-node restrictions:", len(h.conditional_restrictions),
+          "unsupported conditional relations:", h.unsupported_conditional)
     return h.ways, h.restrictions, h.via_way_restrictions, h.conditional_restrictions
 
 
