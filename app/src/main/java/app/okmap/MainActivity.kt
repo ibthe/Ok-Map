@@ -2055,35 +2055,36 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showTrackElevationProfile(id: Long) {
-        val trackName = userDb.tracks().firstOrNull { it.id == id }?.name ?: "Трек"
+        val track = userDb.tracks().firstOrNull { it.id == id }
+        val trackName = track?.name ?: "Трек"
+        val pointCount = track?.count ?: 0
         toast("Строю профиль высот…")
         thread(name = "track-elevation-profile") {
-            // Read and sample in the background so long recordings never freeze the map UI.
-            val points = runCatching { userDb.trackPoints(id) }.getOrNull()
-            if (points == null || points.size < 2) {
+            // Stream from SQLite and retain at most 300 samples; never materialize a huge track.
+            val maxSamples = 300
+            val step = ((pointCount + maxSamples - 1) / maxSamples).coerceAtLeast(1)
+            val samples = ArrayList<ElevationSample>(minOf(pointCount, maxSamples))
+            var distance = 0.0
+            var index = 0
+            var previous: LatLng? = null
+            val read = runCatching {
+                userDb.forEachTrackPoint(id) { p ->
+                    val current = LatLng(p.lat, p.lon)
+                    if (previous != null) distance += previous!!.distanceTo(current)
+                    if (index % step == 0 || index == pointCount - 1) {
+                        val demAltitude = runCatching { elevation?.at(p.lat, p.lon)?.toDouble() }.getOrNull()
+                        val altitude = demAltitude ?: p.ele.takeIf { it.isFinite() }
+                        if (altitude != null && altitude.isFinite()) samples.add(ElevationSample(distance, altitude))
+                    }
+                    previous = current
+                    index++
+                }
+            }
+            if (read.isFailure || index < 2) {
                 runOnUiThread {
                     if (!isFinishing && !isDestroyed) toast("В треке недостаточно точек")
                 }
                 return@thread
-            }
-            val distances = DoubleArray(points.size)
-            var distance = 0.0
-            var previous: LatLng? = null
-            for (i in points.indices) {
-                val current = LatLng(points[i].lat, points[i].lon)
-                if (previous != null) distance += previous.distanceTo(current)
-                distances[i] = distance
-                previous = current
-            }
-            val maxSamples = 300
-            val indexes = if (points.size <= maxSamples) points.indices.toList()
-                else (0 until maxSamples).map { it * (points.size - 1) / (maxSamples - 1) }.distinct()
-            val samples = ArrayList<ElevationSample>(indexes.size)
-            for (index in indexes) {
-                val p = points[index]
-                val demAltitude = runCatching { elevation?.at(p.lat, p.lon)?.toDouble() }.getOrNull()
-                val altitude = demAltitude ?: p.ele.takeIf { it.isFinite() }
-                if (altitude != null && altitude.isFinite()) samples.add(ElevationSample(distances[index], altitude))
             }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
