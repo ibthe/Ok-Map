@@ -99,6 +99,7 @@ class MainActivity : AppCompatActivity() {
     private var rulerOn = false
     private val rulerPts = ArrayList<LatLng>()
     private var shownTrackId = -1L
+    private var trackRenderGeneration = 0
 
     private var myLoc: Location? = null
     private lateinit var nav: Navigator
@@ -695,8 +696,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshTrack() {
         val id = if (TrackService.running) prefs.getLong("rec_track", 0L) else shownTrackId
-        val pts = if (id > 0) userDb.trackLatLng(id) else emptyList()
-        src("ovl-track")?.setGeoJson(Geo.lineFc(pts))
+        val generation = ++trackRenderGeneration
+        thread(name = "track-render") {
+            val points = if (id > 0) runCatching { userDb.trackLatLng(id) }.getOrDefault(emptyList()) else emptyList()
+            val geoJson = Geo.lineFc(points)
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed && generation == trackRenderGeneration) {
+                    src("ovl-track")?.setGeoJson(geoJson)
+                }
+            }
+        }
     }
 
     private fun refreshRuler() {
@@ -2117,11 +2126,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun fitTrack(id: Long) {
-        val pts = userDb.trackLatLng(id)
-        if (pts.size < 2) return
-        val b = LatLngBounds.Builder()
-        pts.forEach { b.include(it) }
-        try { map?.easeCamera(CameraUpdateFactory.newLatLngBounds(b.build(), 80), 800) } catch (e: Exception) {}
+        thread(name = "fit-track") {
+            val points = runCatching { userDb.trackLatLng(id) }.getOrDefault(emptyList())
+            if (points.size < 2) return@thread
+            val bounds = LatLngBounds.Builder()
+            points.forEach { bounds.include(it) }
+            val result = runCatching { bounds.build() }.getOrNull() ?: return@thread
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) {
+                    try { map?.easeCamera(CameraUpdateFactory.newLatLngBounds(result, 80), 800) } catch (_: Exception) {}
+                }
+            }
+        }
     }
 
     // ============================================================ GPX

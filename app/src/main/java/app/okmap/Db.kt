@@ -194,7 +194,29 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 2) {
         return out
     }
 
-    fun trackLatLng(id: Long): List<LatLng> = trackPoints(id).map { LatLng(it.lat, it.lon) }
+    /** Downsample large tracks for map rendering while preserving the first and last points. */
+    fun trackLatLng(id: Long, maxPoints: Int = 8000): List<LatLng> {
+        val db = readableDatabase
+        val total = db.rawQuery("select count(*) from track_points where track_id=?", arrayOf(id.toString()))
+            .use { if (it.moveToFirst()) it.getInt(0) else 0 }
+        if (total == 0) return emptyList()
+        val limit = maxPoints.coerceAtLeast(2)
+        val step = ((total + limit - 1) / limit).coerceAtLeast(1)
+        val out = ArrayList<LatLng>(minOf(total, limit + 1))
+        var index = 0
+        db.rawQuery(
+            "select lat,lon from track_points where track_id=? order by id",
+            arrayOf(id.toString())
+        ).use { c ->
+            while (c.moveToNext()) {
+                if (index % step == 0 || index == total - 1) {
+                    out.add(LatLng(c.getDouble(0), c.getDouble(1)))
+                }
+                index++
+            }
+        }
+        return out
+    }
 
     fun deleteTrack(id: Long) {
         val db = writableDatabase
