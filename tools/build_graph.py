@@ -6,12 +6,12 @@ Usage: build_graph.py <region.osm.pbf> <graph.bin>        (needs: pip install os
 Model: nodes = road junctions and dead ends; segments = road pieces between two junctions with their shape,
 length, driving speed, direction rules, class and name.
 
-File "OKG2" v3 (little endian): 20 int32 header (magic, version, N nodes, S segments, P shape points, A adjacency size,
+File "OKG2" v4 (little endian): 20 int32 header (magic, version, N nodes, S segments, P shape points, A adjacency size,
 M names, name bytes, max km/h, grid lat0, lon0, cell, W, H, cell data size), then N lat, N lon (micro-degrees),
 adjacency CSR (N+1 starts, A segment ids), per segment: A node, B node, length (dm), name id, shape start (int32 each),
 km/h (u8), flags (u8: bit0 A->B allowed, bit1 B->A allowed, bits2-5 road class, bit6 roundabout, bit7 unpaved),
 shape count (u16), then shape lat / lon (int32), name offsets + UTF-8 bytes, and the snapping grid (cell starts + segment ids).
-Read by app/.../Graph.kt and tools/route_check.py.
+Version 4 appends weekday/time-window turn records after the via-way sequence section. Read by app/.../Graph.kt and tools/route_check.py.
 """
 import math
 import re
