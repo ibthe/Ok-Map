@@ -125,16 +125,17 @@ assert bg.car_restriction_kind({"type": "restriction", "restriction": "only_stra
                                 "except": "vehicle"}) is None
 assert bg.car_restriction_kind({"type": "restriction", "restriction": "no_entry"}) is None
 
-# The Python reader accepts legacy v1 graphs, but rejects truncated / malformed v2 tails.
+# The Python reader accepts legacy v1/v2 graphs, but rejects malformed v2 tails.
 legacy_raw = bytearray(open(p, "rb").read())
-assert struct.unpack_from("<i", legacy_raw, 4)[0] == 2
+assert struct.unpack_from("<i", legacy_raw, 4)[0] == 3
 struct.pack_into("<i", legacy_raw, 4, 1)
 legacy_path = os.path.join(tempfile.mkdtemp(), "legacy-v1.bin")
 open(legacy_path, "wb").write(legacy_raw[:-8])  # omit v2 turn and v3 sequence count sections
 legacy_graph = rc.Graph(legacy_path)
 assert legacy_graph.version == 1 and not legacy_graph.turns
 
-bad_raw = bytearray(open(p, "rb").read())
+bad_raw = bytearray(open(p, "rb").read()[:-4])
+struct.pack_into("<i", bad_raw, 4, 2)
 struct.pack_into("<i", bad_raw, len(bad_raw) - 4, -1)
 bad_path = os.path.join(tempfile.mkdtemp(), "bad-v2.bin")
 open(bad_path, "wb").write(bad_raw)
