@@ -488,6 +488,7 @@ class MainActivity : AppCompatActivity() {
             if (!isFinishing && !isDestroyed) {
                 style = s
                 apply3dBuildings(s)
+                applyMapLayerVisibility(s)
                 if (prefs.getBoolean("map_3d", false) && !nav.active) set3dCamera(true)
                 addOverlays(s)
                 applyLabels(s)
@@ -508,10 +509,11 @@ class MainActivity : AppCompatActivity() {
     private fun applyLabels(s: Style) {
         val langs = enabledLanguages()
         val simple = prefs.getBoolean("labels_simple", false)
+        val labelsOn = prefs.getBoolean("layer_labels", true)
         for (layer in s.layers) {
             if (layer is SymbolLayer && layer.id.startsWith("lbl-")) {
                 // spot heights and summits belong to the elevation map type only
-                val vis = if (layer.id == "lbl-peak" && mapType() != "topo") Property.NONE else Property.VISIBLE
+                val vis = if (!labelsOn || (layer.id == "lbl-peak" && mapType() != "topo")) Property.NONE else Property.VISIBLE
                 if (simple) {
                     layer.setProperties(
                         PropertyFactory.visibility(vis),
@@ -534,6 +536,34 @@ class MainActivity : AppCompatActivity() {
         s.getLayer("relief-hillshade")?.setProperties(
             PropertyFactory.visibility(if (on) Property.VISIBLE else Property.NONE)
         )
+    }
+
+    /** Independent visibility controls for the main vector layer groups. */
+    private fun applyMapLayerVisibility(s: Style) {
+        val roads = prefs.getBoolean("layer_roads", true)
+        val buildings = prefs.getBoolean("layer_buildings", true)
+        val water = prefs.getBoolean("layer_water", true)
+        val landuse = prefs.getBoolean("layer_landuse", true)
+        val boundaries = prefs.getBoolean("layer_boundaries", true)
+        for (layer in s.layers) {
+            val visible = when {
+                layer.id.startsWith("road-") -> roads
+                layer.id == "building" || layer.id == "building-outline" || layer.id == "building-3d" -> buildings
+                layer.id == "water" || layer.id == "water-seam" || layer.id.startsWith("waterway-") -> water
+                layer.id.startsWith("landcover-") || layer.id.startsWith("landuse-") -> landuse
+                layer.id.startsWith("boundary-") -> boundaries
+                else -> null
+            }
+            if (visible != null) {
+                layer.setProperties(PropertyFactory.visibility(if (visible) Property.VISIBLE else Property.NONE))
+            }
+        }
+        applySatelliteOpacity(s)
+    }
+
+    private fun applySatelliteOpacity(s: Style) {
+        val opacity = prefs.getInt("sat_opacity", 100).coerceIn(0, 100) / 100f
+        s.getLayer("sat-imagery")?.setProperties(PropertyFactory.rasterOpacity(opacity))
     }
 
     /** Adds offline 3D building extrusions from the OpenMapTiles building layer. */
@@ -1066,6 +1096,85 @@ class MainActivity : AppCompatActivity() {
         return box
     }
 
+    private fun showLayerManager() {
+        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(24))
+        }
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        fun add(v: View) { body.addView(v); body.addView(divider()) }
+        root.addView(dragHandle())
+        root.addView(label("Слои карты", 22f, R.attr.gTextPrimary, true).apply {
+            setPadding(dp(4), dp(4), 0, dp(12))
+        })
+        add(menuSwitch("Дороги", prefs.getBoolean("layer_roads", true), true,
+            "Автомагистрали, улицы, грунтовки и мосты") { on ->
+            prefs.edit().putBoolean("layer_roads", on).apply()
+            style?.let { applyMapLayerVisibility(it) }
+        })
+        add(menuSwitch("Здания", prefs.getBoolean("layer_buildings", true), true,
+            "Контуры, заливки и объёмные здания") { on ->
+            prefs.edit().putBoolean("layer_buildings", on).apply()
+            style?.let { applyMapLayerVisibility(it) }
+        })
+        add(menuSwitch("Вода", prefs.getBoolean("layer_water", true), true,
+            "Реки, озёра, водоёмы и береговые линии") { on ->
+            prefs.edit().putBoolean("layer_water", on).apply()
+            style?.let { applyMapLayerVisibility(it) }
+        })
+        add(menuSwitch("Землепользование", prefs.getBoolean("layer_landuse", true), true,
+            "Леса, поля, парки, застройка и промышленные зоны") { on ->
+            prefs.edit().putBoolean("layer_landuse", on).apply()
+            style?.let { applyMapLayerVisibility(it) }
+        })
+        add(menuSwitch("Границы", prefs.getBoolean("layer_boundaries", true), true,
+            "Административные и государственные границы") { on ->
+            prefs.edit().putBoolean("layer_boundaries", on).apply()
+            style?.let { applyMapLayerVisibility(it) }
+        })
+        add(menuSwitch("Подписи и названия", prefs.getBoolean("layer_labels", true), true,
+            "Города, улицы, объекты и транспорт") { on ->
+            prefs.edit().putBoolean("layer_labels", on).apply()
+            style?.let { applyLabels(it); applyTransport(it) }
+        })
+        val opacityLabel = label(
+            "Прозрачность спутника · ${prefs.getInt("sat_opacity", 100).coerceIn(0, 100)}%",
+            14f, R.attr.gTextSecondary, true
+        ).apply { setPadding(dp(4), dp(12), dp(4), dp(4)) }
+        body.addView(opacityLabel)
+        val opacitySlider = com.google.android.material.slider.Slider(this).apply {
+            valueFrom = 0f
+            valueTo = 100f
+            stepSize = 5f
+            value = prefs.getInt("sat_opacity", 100).coerceIn(0, 100).toFloat()
+            addOnChangeListener { _, value, _ ->
+                val percent = value.roundToInt()
+                prefs.edit().putInt("sat_opacity", percent).apply()
+                opacityLabel.text = "Прозрачность спутника · $percent%"
+                style?.let { applySatelliteOpacity(it) }
+            }
+        }
+        body.addView(opacitySlider)
+        body.addView(note("Прозрачность применяется в режиме «Спутник». Категории АЗС, еды, транспорта и других объектов настраиваются кнопками над картой."))
+        val scroll = object : android.widget.ScrollView(this) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                val cap = minOf(dp(440), (resources.displayMetrics.heightPixels - dp(200)).coerceAtLeast(dp(96)))
+                super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(cap, MeasureSpec.AT_MOST))
+            }
+        }.apply {
+            isFillViewport = true
+            clipToPadding = false
+            addView(body, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        root.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        sheet.setContentView(root)
+        styleSheet(sheet)
+        sheet.behavior.skipCollapsed = true
+        sheet.setOnShowListener { sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED }
+        sheet.show()
+    }
+
     private fun note(text: String) = label(text, 13f, R.attr.gHint).apply { setPadding(dp(4), dp(12), dp(4), dp(4)) }
 
     /** Raised "key" button (same look as the on-map buttons). */
@@ -1109,10 +1218,11 @@ class MainActivity : AppCompatActivity() {
                 0 -> {   // MAP: what is drawn
                     val langs = enabledLanguages().joinToString(" ") { it.name }
                     add(mapTypeSwitch())
+                    add(menuRow("Слои карты", null, "Дороги, здания, вода, подписи и прозрачность", act { showLayerManager() }))
                     add(menuSwitch("3D-здания", prefs.getBoolean("map_3d", false), true,
                         "Объёмные здания по данным OSM; масштаб 15+") { on ->
                         prefs.edit().putBoolean("map_3d", on).apply()
-                        style?.let { apply3dBuildings(it) }
+                        style?.let { apply3dBuildings(it); applyMapLayerVisibility(it) }
                         set3dCamera(on, zoomToBuildings = on)
                     })
                     add(menuRow("Языки названий", langs, null, act { showLanguageDialog() }))
@@ -1363,9 +1473,13 @@ class MainActivity : AppCompatActivity() {
             "tr:air" to listOf("tr-aerodrome-dot", "lbl-aerodrome")
         )
         val on = trOn()
+        val labelsOn = prefs.getBoolean("layer_labels", true) &&
+            (prefs.getBoolean("labels_simple", false) || enabledLanguages().isNotEmpty())
         for ((key, ids) in groups) {
-            val v = if (key in on) Property.VISIBLE else Property.NONE
-            for (id in ids) s.getLayer(id)?.setProperties(PropertyFactory.visibility(v))
+            for (id in ids) {
+                val visible = key in on && (!id.startsWith("lbl-") || labelsOn)
+                s.getLayer(id)?.setProperties(PropertyFactory.visibility(if (visible) Property.VISIBLE else Property.NONE))
+            }
         }
     }
 
