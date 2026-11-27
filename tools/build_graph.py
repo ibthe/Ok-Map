@@ -286,6 +286,10 @@ def build(ways, min_component=40, cell=5000, restrictions=(), via_way_restrictio
             arc_way[arc], arc_start[arc], arc_end[arc] = way_id, nb, na
             outgoing_osm.setdefault(nb, []).append(arc)
 
+    arcs_by_way = {}
+    for arc, way_id in arc_way.items():
+        arcs_by_way.setdefault(way_id, []).append(arc)
+
     sequence_restrictions = []
     for from_way, via_ways, to_way, kind in via_way_restrictions:
         via_ways = tuple(int(v) for v in via_ways)
@@ -322,9 +326,8 @@ def build(ways, min_component=40, cell=5000, restrictions=(), via_way_restrictio
                     return
 
         starts = []
-        for arc, wid in arc_way.items():
-            if wid == from_way:
-                node = arc_end[arc]
+        for arc in arcs_by_way.get(from_way, ()):
+            node = arc_end[arc]
                 if any(arc_way.get(a) == via_ways[0] for a in outgoing_osm.get(node, ())):
                     starts.append((arc, node))
         for from_arc, node in starts:
