@@ -130,7 +130,7 @@ legacy_raw = bytearray(open(p, "rb").read())
 assert struct.unpack_from("<i", legacy_raw, 4)[0] == 2
 struct.pack_into("<i", legacy_raw, 4, 1)
 legacy_path = os.path.join(tempfile.mkdtemp(), "legacy-v1.bin")
-open(legacy_path, "wb").write(legacy_raw[:-4])  # v2's zero-count restriction tail
+open(legacy_path, "wb").write(legacy_raw[:-8])  # omit v2 turn and v3 sequence count sections
 legacy_graph = rc.Graph(legacy_path)
 assert legacy_graph.version == 1 and not legacy_graph.turns
 
@@ -161,3 +161,66 @@ assert bg.parse_via_way_members([
     ("from", "w", 100), ("to", "w", 400)
 ]) is None
 print("ordered via-way relation parsing tests passed")
+
+
+# Graph v3: ordered via-way restrictions are resolved to exact directed arc chains
+def via_way_graph(kind, with_bypass):
+    pts = {
+        "a": (3001, 41.7300, 44.8000),
+        "b": (3002, 41.7300, 44.8100),
+        "c": (3003, 41.7350, 44.8200),
+        "d": (3004, 41.7400, 44.8300),
+        "e": (3005, 41.7400, 44.8400),
+        "x": (3006, 41.7500, 44.8200),
+        "f": (3007, 41.7310, 44.8150),
+    }
+    ways = [
+        ({"highway": "residential"}, [pts["a"], pts["b"]], 10),
+        ({"highway": "residential", "oneway": "yes"}, [pts["b"], pts["c"], pts["d"]], 20),
+        ({"highway": "residential"}, [pts["d"], pts["e"]], 30),
+        ({"highway": "residential"}, [pts["c"], pts["x"]], 60),
+    ]
+    if with_bypass:
+        ways.extend([
+            ({"highway": "residential"}, [pts["b"], pts["f"]], 40),
+            ({"highway": "residential"}, [pts["f"], pts["e"]], 50),
+        ])
+    data = bg.build(ways, min_component=1,
+                    via_way_restrictions=[(10, (20,), 30, kind)])
+    path = os.path.join(tempfile.mkdtemp(), "via-way.bin")
+    bg.write(data, path)
+    return rc.Graph(path), data, path
+
+no_via_graph, no_via_data, no_via_path = via_way_graph("no_straight_on", False)
+assert len(no_via_data["sequence_restrictions"]) >= 1
+assert no_via_graph.route(no_via_graph.snap(41.7300, 44.8050),
+                          no_via_graph.snap(41.7400, 44.8350)) is None, "no-via-way restriction was ignored"
+
+only_via_graph, only_via_data, only_via_path = via_way_graph("only_straight_on", True)
+assert len(only_via_data["sequence_restrictions"]) >= 3, only_via_data["sequence_restrictions"]
+only_via_route = only_via_graph.route(only_via_graph.snap(41.7300, 44.8050),
+                                      only_via_graph.snap(41.7400, 44.8350))
+assert only_via_route is not None
+assert 1 in [k for k, _ in only_via_route[1]] and 2 in [k for k, _ in only_via_route[1]], (
+    "only-via-way restriction did not keep the route on the ordered via way", only_via_route[1])
+print("graph v3 ordered via-way no_/only_ routing tests passed")
+
+# v2 remains readable after the v3 writer adds its sequence section.
+v2_raw = bytearray(open(no_via_path, "rb").read())
+struct.pack_into("<i", v2_raw, 4, 2)
+v2_path = os.path.join(tempfile.mkdtemp(), "legacy-v2.bin")
+open(v2_path, "wb").write(v2_raw[:-4])
+v2_graph = rc.Graph(v2_path)
+assert v2_graph.version == 2 and not v2_graph.ac_bad[0]
+
+# v3 rejects malformed sequence records.
+bad_seq = bytearray(open(no_via_path, "rb").read())
+bad_seq[-4:] = struct.pack("<i", -1)
+bad_seq_path = os.path.join(tempfile.mkdtemp(), "bad-sequence-v3.bin")
+open(bad_seq_path, "wb").write(bad_seq)
+try:
+    rc.Graph(bad_seq_path)
+    raise AssertionError("negative v3 sequence count was accepted")
+except ValueError:
+    pass
+print("graph v1/v2/v3 compatibility and malformed v3 validation tests passed")
