@@ -57,6 +57,7 @@ class Graph:
                 raise ValueError("turn-restriction arc id out of range")
             self.turns = {(int(a), int(b)) for a, b in pairs}
             pos[0] += count * 8
+        self.ac_edges, self.ac_fail, self.ac_bad, self.ac_only = [{}], [0], [False], [None]
         if self.version == 3:
             if pos[0] + 4 > len(raw):
                 raise ValueError("missing sequence-restriction section")
