@@ -123,7 +123,8 @@ assert bg.car_restriction_kind({"type": "restriction", "restriction": "no_left_t
                                 "except": "psv; motorcar"}) is None
 assert bg.car_restriction_kind({"type": "restriction", "restriction": "only_straight_on",
                                 "except": "vehicle"}) is None
-assert bg.car_restriction_kind({"type": "restriction", "restriction": "no_entry"}) is None
+assert bg.car_restriction_kind({"type": "restriction", "restriction": "no_entry"}) == "no_entry"
+assert bg.car_restriction_kind({"type": "restriction", "restriction": "no_exit"}) == "no_exit"
 
 # The Python reader accepts legacy v1/v2 graphs, but rejects malformed v2 tails.
 legacy_raw = bytearray(open(p, "rb").read())
@@ -176,6 +177,51 @@ assert bg.parse_via_node_members([
 assert bg.parse_via_node_members([
     ("from", "w", 100), ("via", "n", 250), ("via", "r", 251), ("to", "w", 400)
 ]) is None
+
+# OSM no_entry has one from-way and multiple to-ways; no_exit has multiple
+# from-ways and one to-way. Expand them into exact pairs, never broaden malformed roles.
+assert bg.parse_via_node_member_pairs([
+    ("from", "w", 100), ("via", "n", 250),
+    ("to", "w", 400), ("to", "w", 401)
+], "no_entry") == [(100, 250, 400), (100, 250, 401)]
+assert bg.parse_via_node_member_pairs([
+    ("from", "w", 100), ("from", "w", 101),
+    ("via", "n", 250), ("to", "w", 400)
+], "no_exit") == [(100, 250, 400), (101, 250, 400)]
+assert bg.parse_via_node_member_pairs([
+    ("from", "w", 100), ("from", "w", 101),
+    ("via", "n", 250), ("to", "w", 400)
+], "no_entry") == []
+assert bg.parse_via_node_member_pairs([
+    ("from", "w", 100), ("via", "n", 250),
+    ("to", "w", 400), ("to", "w", 401)
+], "no_exit") == []
+
+# Expanded no_entry/no_exit pairs are enforced by the same directed-turn table.
+multi_nodes = {
+    "west": (501, 41.73, 44.80), "center": (502, 41.73, 44.81),
+    "north": (503, 41.74, 44.81), "south": (504, 41.72, 44.81),
+    "east": (505, 41.73, 44.82), "west2": (506, 41.735, 44.80)
+}
+multi_ways = [
+    ({"highway": "residential"}, [multi_nodes["west"], multi_nodes["center"]], 10),
+    ({"highway": "residential"}, [multi_nodes["center"], multi_nodes["north"]], 20),
+    ({"highway": "residential"}, [multi_nodes["center"], multi_nodes["south"]], 30),
+    ({"highway": "residential"}, [multi_nodes["center"], multi_nodes["east"]], 40),
+    ({"highway": "residential"}, [multi_nodes["west2"], multi_nodes["center"]], 11)
+]
+entry_pairs = bg.parse_via_node_member_pairs([
+    ("from", "w", 10), ("via", "n", 502), ("to", "w", 20), ("to", "w", 30)
+], "no_entry")
+entry_data = bg.build(multi_ways, min_component=1,
+                      restrictions=[(*pair, "no_entry") for pair in entry_pairs])
+assert entry_data["turn_restrictions"].shape[0] == 2, entry_data["turn_restrictions"]
+exit_pairs = bg.parse_via_node_member_pairs([
+    ("from", "w", 10), ("from", "w", 11), ("via", "n", 502), ("to", "w", 20)
+], "no_exit")
+exit_data = bg.build(multi_ways, min_component=1,
+                     restrictions=[(*pair, "no_exit") for pair in exit_pairs])
+assert exit_data["turn_restrictions"].shape[0] == 2, exit_data["turn_restrictions"]
 # Unknown roles must invalidate the whole relation instead of being silently discarded.
 assert bg.parse_via_way_members([
     ("from", "w", 100), ("via", "w", 200), ("to", "w", 400), ("location_hint", "n", 999)

@@ -38,6 +38,7 @@ UNPAVED = {"unpaved", "gravel", "dirt", "ground", "sand", "grass", "mud", "compa
 DENY = {"no", "private", "customers", "agricultural", "forestry", "military", "delivery", "permit", "restricted"}
 NO_TURN_RESTRICTIONS = {"no_left_turn", "no_right_turn", "no_u_turn", "no_straight_on"}
 ONLY_TURN_RESTRICTIONS = {"only_left_turn", "only_right_turn", "only_u_turn", "only_straight_on"}
+MULTI_MEMBER_TURN_RESTRICTIONS = {"no_entry", "no_exit"}
 
 
 def car_restriction_kind(tags):
@@ -54,7 +55,7 @@ def car_restriction_kind(tags):
     kind = (tags.get("restriction:motorcar")
             or tags.get("restriction:motor_vehicle")
             or tags.get("restriction", ""))
-    return kind if kind in NO_TURN_RESTRICTIONS or kind in ONLY_TURN_RESTRICTIONS else None
+    return kind if kind in NO_TURN_RESTRICTIONS or kind in ONLY_TURN_RESTRICTIONS or kind in MULTI_MEMBER_TURN_RESTRICTIONS else None
 
 
 def parse_via_way_members(members):
@@ -75,18 +76,39 @@ def parse_via_way_members(members):
     return (from_members[0][1], tuple(ref for _, ref in via_members), to_members[0][1])
 
 
-def parse_via_node_members(members):
-    """Parse a via-node restriction only when all three required member roles are exact."""
+def parse_via_node_member_pairs(members, kind):
+    """Expand via-node no_entry/no_exit relations into exact directed way pairs."""
     if any(role not in ("from", "via", "to") for role, _, _ in members):
-        return None
+        return []
     from_members = [(typ, int(ref)) for role, typ, ref in members if role == "from"]
     via_members = [(typ, int(ref)) for role, typ, ref in members if role == "via"]
     to_members = [(typ, int(ref)) for role, typ, ref in members if role == "to"]
+    if len(via_members) != 1 or via_members[0][0] != "n":
+        return []
+    via_node = via_members[0][1]
+
+    if kind == "no_entry":
+        if (len(from_members) != 1 or from_members[0][0] != "w" or not to_members or
+                any(typ != "w" for typ, _ in to_members)):
+            return []
+        return [(from_members[0][1], via_node, to_ref) for _, to_ref in to_members]
+
+    if kind == "no_exit":
+        if (len(to_members) != 1 or to_members[0][0] != "w" or not from_members or
+                any(typ != "w" for typ, _ in from_members)):
+            return []
+        return [(from_ref, via_node, to_members[0][1]) for _, from_ref in from_members]
+
     if (len(from_members) != 1 or from_members[0][0] != "w" or
-            len(via_members) != 1 or via_members[0][0] != "n" or
             len(to_members) != 1 or to_members[0][0] != "w"):
-        return None
-    return (from_members[0][1], via_members[0][1], to_members[0][1])
+        return []
+    return [(from_members[0][1], via_node, to_members[0][1])]
+
+
+def parse_via_node_members(members):
+    """Backward-compatible parser for a single from/via/to relation."""
+    pairs = parse_via_node_member_pairs(members, "no_left_turn")
+    return pairs[0] if len(pairs) == 1 else None
 
 
 def haversine(la1, lo1, la2, lo2):
@@ -495,9 +517,9 @@ def read_pbf(path):
             if parsed_via is not None:
                 self.via_way_restrictions.append((*parsed_via, kind))
                 return
-            parsed_node = parse_via_node_members(ordered)
-            if parsed_node is not None:
-                self.restrictions.append((*parsed_node, kind))
+            parsed_nodes = parse_via_node_member_pairs(ordered, kind)
+            if parsed_nodes:
+                self.restrictions.extend((*parsed_node, kind) for parsed_node in parsed_nodes)
 
     h = H()
     h.apply_file(path, locations=True)
