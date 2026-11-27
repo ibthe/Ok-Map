@@ -615,7 +615,7 @@ class Graph(file: File) {
             if (node == segB(ke) && canBackward(ke)) {
                 val endArc = 2 * ke + 1
                 val tail = adjustedCost(ke, le - e.off, endArc)
-                if (!forbiddenTurn(inArc, endArc) && !restrictionAutomaton.blocks(acState, endArc) &&
+                if (!forbiddenTurn(inArc, endArc, activeConditional) && !restrictionAutomaton.blocks(acState, endArc) &&
                     currentCost + tail < best) {
                     best = currentCost + tail; bestState = state; bestEndArc = endArc
                 }
