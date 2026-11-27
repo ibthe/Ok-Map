@@ -263,13 +263,19 @@ jobs:
           python build_relief.py ../app/src/main/assets/relief.mbtiles
           cp /tmp/relief.stamp ../app/src/main/assets/relief.stamp
 
+      # Run the synthetic contour regression test on every build. Do not hide test failures
+      # inside the optional dataset-build step below.
+      - name: Test contour generation
+        run: |
+          python -m pip install --quiet numpy pillow scipy contourpy shapely
+          python tools/test_contours.py
+
       # Contour lines for the "Высоты" map type, computed from the relief DEM. Optional: the APK builds without them.
       - name: Build contour lines (elevation map type)
         if: steps.need.outputs.contours == 'true' || steps.need.outputs.relief == 'true'
         continue-on-error: true
         run: |
           python -m pip install --quiet numpy pillow scipy contourpy shapely
-          python tools/test_contours.py
           python tools/build_contours.py app/src/main/assets/relief.mbtiles app/src/main/assets/contours.mbtiles
           ls -lh app/src/main/assets/contours.mbtiles
           cp /tmp/contours.stamp app/src/main/assets/contours.stamp
