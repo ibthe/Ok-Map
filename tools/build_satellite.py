@@ -108,6 +108,7 @@ def main(map_path, out_path, template, max_zoom=12, min_zoom=0, details=()):
             create unique index tile_index on tiles (zoom_level, tile_column, tile_row);
             create table metadata (name text, value text);""")
         ok = size = 0
+        fmt = "jpg"
         with ThreadPoolExecutor(8) as pool:
             for (z, x, y), data in zip(jobs, pool.map(lambda j: fetch(tile_url(template, *j)), jobs)):
                 if not data or len(data) < MIN_BYTES:
