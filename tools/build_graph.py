@@ -343,7 +343,7 @@ def build(ways, min_component=40, cell=5000, restrictions=(), via_way_restrictio
             if kind.startswith("only_"):
                 full_path = prefix
                 for i in range(len(full_path) - 1):
-                    sequence_restrictions.append((2, full_path[:i + 1], [full_path[i + 1]])
+                    sequence_restrictions.append((2, full_path[:i + 1], [full_path[i + 1]]))
                 sequence_restrictions.append((2, full_path, list(allowed_to)))
             else:
                 for to_arc in allowed_to:
@@ -478,7 +478,7 @@ def read_pbf(path):
     h = H()
     h.apply_file(path, locations=True)
     print("routable ways:", len(h.ways), "via-node restrictions:", len(h.restrictions),
-          "via-way restrictions detected (not yet encoded):", len(h.via_way_restrictions))
+          "via-way restrictions detected:", len(h.via_way_restrictions))
     return h.ways, h.restrictions, h.via_way_restrictions
 
 
