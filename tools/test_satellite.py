@@ -10,6 +10,7 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_satellite as bs
+import validate_mbtiles as vm
 
 
 def image_bytes():
@@ -46,7 +47,25 @@ def run():
         assert count == 1, count
         assert metadata["format"] == "jpg", metadata
         assert Image.open(io.BytesIO(tile)).format == "JPEG"
+        assert vm.validate(output) == 1
         print("satellite valid-image build test passed")
+
+        # A downloadable MBTiles archive with corrupt tile bytes must never be published.
+        invalid = os.path.join(root, "invalid.mbtiles")
+        bad = sqlite3.connect(invalid)
+        bad.executescript("""
+            create table metadata (name text, value text);
+            create table tiles (zoom_level integer, tile_column integer, tile_row integer, tile_data blob);
+            insert into tiles values (0, 0, 0, X'3C68746D6C3E');
+        """)
+        bad.commit()
+        bad.close()
+        try:
+            vm.validate(invalid)
+            raise AssertionError("corrupt raster MBTiles unexpectedly validated")
+        except ValueError:
+            pass
+        print("external satellite MBTiles validation test passed")
 
         # A failed/invalid download must leave the previous destination untouched.
         previous = open(output, "rb").read()

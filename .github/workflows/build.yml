@@ -254,8 +254,18 @@ jobs:
         if: inputs.sat_url != ''
         continue-on-error: true
         run: |
-          curl -L --fail -o app/src/main/assets/sat.mbtiles "${{ inputs.sat_url }}"
-          ls -lh app/src/main/assets/sat.mbtiles
+          set -euo pipefail
+          python -m pip install --quiet pillow
+          target="app/src/main/assets/sat.mbtiles"
+          tmp="${target}.download"
+          trap 'rm -f "$tmp"' EXIT
+          rm -f "$tmp"
+          curl -L --fail --retry 3 --retry-all-errors -o "$tmp" "${{ inputs.sat_url }}"
+          python tools/validate_mbtiles.py "$tmp"
+          # Publish only a fully validated database; a failed download/validation leaves the
+          # previous working offline imagery untouched.
+          mv -f "$tmp" "$target"
+          ls -lh "$target"
 
       - name: Fingerprint offline map data
         run: |
