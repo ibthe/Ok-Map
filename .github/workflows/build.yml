@@ -64,7 +64,7 @@ jobs:
           HASH=$(
             {
               cat tools/fetch_osm.py tools/finalize_tiles.py tools/check_tiles.py tools/mvt.py tools/build_relief.py tools/build_satellite.py
-              printf '%s' "${SAT_TILES}|${SAT_ZOOM}|${SAT_MIN_ZOOM}|${SAT_DETAIL}"
+              printf '%s' "${SAT_TILES}|${SAT_ZOOM}|${SAT_DETAIL}"
             } | sha256sum | cut -d' ' -f1
           )
           echo "key=mapdata-v4-${HASH}" >> "$GITHUB_OUTPUT"
