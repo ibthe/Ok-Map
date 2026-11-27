@@ -5,10 +5,11 @@ import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
 import android.graphics.Rect
 import android.view.LayoutInflater
+import android.util.AttributeSet
+import android.content.Context
 import android.view.View
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import org.maplibre.android.MapLibre
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -107,9 +108,18 @@ class OfflineAppSmokeTest {
         val failure = java.util.concurrent.atomic.AtomicReference<Throwable?>()
         InstrumentationRegistry.getInstrumentation().runOnMainSync {
             try {
-                // MapLibre and Android View construction/measurement must stay on the UI thread.
-                MapLibre.getInstance(context)
-                val root = LayoutInflater.from(context).inflate(R.layout.activity_main, null, false)
+                // Replace only the MapLibre rendering surface with a plain View. This test
+                // measures the Android layout geometry, not the native renderer lifecycle.
+                val inflater = LayoutInflater.from(context).cloneInContext(context)
+                inflater.setFactory2(object : LayoutInflater.Factory2 {
+                    override fun onCreateView(
+                        parent: View?, name: String, ctx: Context, attrs: AttributeSet
+                    ): View? = if (name == "org.maplibre.android.maps.MapView") View(ctx, attrs) else null
+
+                    override fun onCreateView(name: String, ctx: Context, attrs: AttributeSet): View? =
+                        onCreateView(null, name, ctx, attrs)
+                })
+                val root = inflater.inflate(R.layout.activity_main, null, false)
                 val ids = listOf(
                     R.id.mapView, R.id.etSearch, R.id.btnMenu, R.id.btnPoint,
                     R.id.btnLocation, R.id.btnCompass, R.id.btnRec, R.id.dock, R.id.rightControls
