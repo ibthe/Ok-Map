@@ -37,7 +37,7 @@ class RestrictionAutomatonTest {
     fun overlappingViaWaySuffixRemainsActiveAfterAhoCorasickFallback() {
         val automaton = RestrictionAutomaton(
             listOf(
-                SequenceRestriction(type = 1, prefix = intArrayOf(10, 20, 30), allowed = intArrayOf()),
+                SequenceRestriction(type = 1, prefix = intArrayOf(10, 20, 30, 99), allowed = intArrayOf()),
                 SequenceRestriction(type = 1, prefix = intArrayOf(20, 30, 40), allowed = intArrayOf())
             )
         )
