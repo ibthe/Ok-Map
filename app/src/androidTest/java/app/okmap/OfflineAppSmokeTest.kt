@@ -50,17 +50,19 @@ class OfflineAppSmokeTest {
                 db.addWaypoint("saved", 41.7, 44.8, "Travel")
                 val id = db.newTrack("committed track")
                 db.addPoints(id, listOf(
-                    UserDb.Pt(41.7, 44.8, Double.NaN, 10L),
-                    UserDb.Pt(41.8, 44.9, 120.0, 20L)
+                    UserDb.Pt(41.7, 44.8, Double.NaN, 10L, segment = 0),
+                    UserDb.Pt(41.8, 44.9, 120.0, 20L, segment = 1)
                 ))
                 id
             }
 
             assertEquals("saved", db.waypoints().single().name)
             assertEquals(2, db.trackPoints(trackId).size)
+            assertEquals(listOf(0, 1), db.trackPoints(trackId).map { it.segment })
             val streamed = ArrayList<UserDb.Pt>()
             db.forEachTrackPoint(trackId) { streamed.add(it) }
             assertEquals(db.trackPoints(trackId), streamed)
+            assertEquals(listOf(0, 1), streamed.map { it.segment })
         } finally {
             db.close()
         }
@@ -75,6 +77,8 @@ class OfflineAppSmokeTest {
             legacy.execSQL("CREATE TABLE waypoints(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, lat REAL, lon REAL, ts INTEGER)")
             legacy.execSQL("CREATE TABLE tracks(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, start INTEGER)")
             legacy.execSQL("CREATE TABLE track_points(id INTEGER PRIMARY KEY AUTOINCREMENT, track_id INTEGER, ts INTEGER, lat REAL, lon REAL, ele REAL)")
+            legacy.execSQL("INSERT INTO tracks(name,start) VALUES('legacy track',123)")
+            legacy.execSQL("INSERT INTO track_points(track_id,ts,lat,lon,ele) VALUES(1,456,41.7,44.8,100)")
             legacy.execSQL("CREATE INDEX tp_idx ON track_points(track_id)")
             legacy.execSQL("INSERT INTO waypoints(name,lat,lon,ts) VALUES('legacy place',41.7,44.8,123)")
             legacy.version = 1
@@ -86,6 +90,9 @@ class OfflineAppSmokeTest {
             assertEquals("legacy place", migrated.name)
             assertEquals(UserDb.DEFAULT_FOLDER, migrated.folder)
             assertTrue(db.folders().contains(UserDb.DEFAULT_FOLDER))
+            val legacyTrack = db.tracks().single()
+            assertEquals("legacy track", legacyTrack.name)
+            assertEquals(0, db.trackPoints(legacyTrack.id).single().segment)
         } finally {
             db.close()
         }
