@@ -401,7 +401,8 @@ def build(ways, min_component=40, cell=5000, restrictions=(), via_way_restrictio
     return dict(nlat=nlat_a, nlon=nlon_a, adj_start=adj_start, adj=adj, A=A, B=B, LEN=LEN, NAME=NAME, SST=SST,
                 KMH=KMH, FLG=FLG, SCNT=SCNT, shp_lat=shp_lat_a, shp_lon=shp_lon_a, name_off=name_off,
                 name_bytes=b"".join(name_bytes), names=len(names), lat0=lat0, lon0=lon0, cell=cell, W=W, H=H,
-                cell_start=cell_start, cell_data=cell_data, turn_restrictions=turn_restrictions,\n                sequence_restrictions=sequence_restrictions)
+                cell_start=cell_start, cell_data=cell_data, turn_restrictions=turn_restrictions,
+                sequence_restrictions=sequence_restrictions)
 
 
 def pad4(b):
