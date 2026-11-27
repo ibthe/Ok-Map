@@ -185,10 +185,19 @@ class Graph:
 
         dist, prev, heap = {}, {}, []
         starts = []
-        if self.FLG[ks] & 2:
-            starts.append((2 * ks + 1, self.cost(ks, os_)))
-        if self.FLG[ks] & 1:
-            starts.append((2 * ks, self.cost(ks, Lk - os_)))
+        start_at_node = os_ <= 1.0 or Lk - os_ <= 1.0
+        if start_at_node:
+            start_node = int(self.A[ks] if os_ <= 1.0 else self.B[ks])
+            for k in self.adj[self.adj_start[start_node]:self.adj_start[start_node + 1]]:
+                if self.A[k] == start_node and self.FLG[k] & 1:
+                    starts.append((2 * int(k), self.cost(int(k), self.LEN[k] / 10.0)))
+                elif self.B[k] == start_node and self.FLG[k] & 2:
+                    starts.append((2 * int(k) + 1, self.cost(int(k), self.LEN[k] / 10.0)))
+        else:
+            if self.FLG[ks] & 2:
+                starts.append((2 * ks + 1, self.cost(ks, os_)))
+            if self.FLG[ks] & 1:
+                starts.append((2 * ks, self.cost(ks, Lk - os_)))
         for arc, cost in starts:
             ac = self._ac_next(0, arc)
             if self.ac_bad[ac]:
