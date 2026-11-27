@@ -506,6 +506,18 @@ class Graph(file: File) {
         var best = inf
         var bestState = -1L
         var bestEndArc = -1
+        var directStartLeg: Leg? = null
+        if (startAtNode && startNode == segA(ke) && canForward(ke)) {
+            best = cost(ke, e.off, avoidUnpaved)
+            directStartLeg = Leg(ke, 0.0, e.off, -1)
+        }
+        if (startAtNode && startNode == segB(ke) && canBackward(ke)) {
+            val direct = cost(ke, le - e.off, avoidUnpaved)
+            if (direct < best) {
+                best = direct
+                directStartLeg = Leg(ke, le, e.off, -1)
+            }
+        }
         while (heap.size > 0) {
             val state = heap.pop()
             if (heap.topKey >= best) break
