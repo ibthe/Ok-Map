@@ -4,6 +4,7 @@ import org.maplibre.android.geometry.LatLng
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
+import org.maplibre.geojson.MultiLineString
 import org.maplibre.geojson.Point
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -36,6 +37,17 @@ object Geo {
             fs.add(Feature.fromGeometry(LineString.fromLngLats(pts.map { Point.fromLngLat(it.longitude, it.latitude) })))
         }
         return FeatureCollection.fromFeatures(fs)
+    }
+
+    /** Draw disconnected track segments as a MultiLineString, never as a false connecting line. */
+    fun multiLineFc(segments: List<List<LatLng>>): FeatureCollection {
+        val lines = segments.filter { it.size >= 2 }.map { segment ->
+            segment.map { Point.fromLngLat(it.longitude, it.latitude) }
+        }
+        val features = if (lines.isEmpty()) emptyList() else listOf(
+            Feature.fromGeometry(MultiLineString.fromLngLats(lines))
+        )
+        return FeatureCollection.fromFeatures(features)
     }
 
     /** Accepts "41.7151, 44.8271", "41.7151 44.8271", "41.7151;44.8271". */
