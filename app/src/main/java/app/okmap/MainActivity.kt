@@ -2212,7 +2212,8 @@ class MainActivity : AppCompatActivity() {
             var trks = 0
             var error: String? = null
             try {
-                val p = Xml.newPullParser()
+                importDb.transaction {
+                    val p = Xml.newPullParser()
                 // GPX is user-supplied XML. Do not process document type declarations or
                 // external entities; only the GPX data itself is needed.
                 p.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
@@ -2322,6 +2323,7 @@ class MainActivity : AppCompatActivity() {
                         ev = p.next()
                     }
                 } ?: throw IllegalStateException("Не удалось открыть GPX-файл")
+                }
             } catch (e: Exception) {
                 error = e.message ?: e.javaClass.simpleName
             } finally {
