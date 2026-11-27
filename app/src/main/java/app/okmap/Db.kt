@@ -155,9 +155,23 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 2) {
         writableDatabase.insert("track_points", null, v)
     }
 
-    fun addPoints(trackId: Long, pts: List<Pt>) {
+    /** Run a group of user-data writes atomically; exceptions roll the whole operation back. */
+    fun <T> transaction(block: () -> T): T {
         val db = writableDatabase
         db.beginTransaction()
+        try {
+            val result = block()
+            db.setTransactionSuccessful()
+            return result
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun addPoints(trackId: Long, pts: List<Pt>) {
+        val db = writableDatabase
+        val ownsTransaction = !db.inTransaction()
+        if (ownsTransaction) db.beginTransaction()
         try {
             for (p in pts) {
                 val v = ContentValues()
@@ -165,9 +179,9 @@ class UserDb(ctx: Context) : SQLiteOpenHelper(ctx, "user.db", null, 2) {
                 if (!p.ele.isNaN()) v.put("ele", p.ele)
                 db.insert("track_points", null, v)
             }
-            db.setTransactionSuccessful()
+            if (ownsTransaction) db.setTransactionSuccessful()
         } finally {
-            db.endTransaction()
+            if (ownsTransaction) db.endTransaction()
         }
     }
 
