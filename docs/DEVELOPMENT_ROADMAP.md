@@ -15,10 +15,10 @@ The product should prioritize trustworthy routing, durable user data, understand
 - The current default dataset and several validation assumptions are Georgia-specific. A manual workflow can accept another OSM extract, but this is not yet an in-app regional package manager.
 - Car routing exists, including one-way roads, static via-node/via-way restrictions, and a supported subset of conditional via-node restrictions. README explicitly documents unsupported restriction cases and vehicle dimensions/weight, tolls, ferries, traffic, and other gaps.
 - GPS track recording runs in a foreground service. User waypoints and tracks are stored in SQLite. GPX import/export is streamed and import is transactional.
-- The database schema is currently version 2. Track points have no segment identifier. GPX import resets the track ID at each `trkseg`, so one GPX track with multiple segments can become multiple app tracks; export writes all points as one segment. This is a confirmed data-model defect.
+- The database schema is version 3. Track points now persist a segment identifier; GPX import keeps multiple `trkseg` elements under one app track, and export writes segment boundaries. Map geometry uses separate lines and elevation-profile distance resets at segment boundaries. These changes are implemented, but a full parser-level GPX import/export round-trip test is still outstanding.
 - The current UI is concentrated in `MainActivity.kt` and `activity_main.xml`; the main activity owns many unrelated workflows.
-- Current Android instrumentation checks database rollback/streaming, a v1 migration, the no-INTERNET manifest invariant, packaged offline assets, and basic layout geometry.
-- The emulator test in workflow run #228 passed at the last inspection; APK assembly was still running. This is not a completed release result until the workflow and artifact upload finish.
+- Current Android instrumentation checks database rollback/streaming, v1-to-v3 migration (including legacy track points), separate segment geometry, the no-INTERNET manifest invariant, packaged offline assets, and basic layout geometry.
+- CI run #236 completed successfully on commit `c490ae78939408ad884fef3ec659119cc9d9d129`: Kotlin router unit tests, Android emulator smoke tests, APK assembly, and artifact upload all passed. The `ok-map-apk` artifact was uploaded (448,468,917 bytes). This is emulator/CI evidence, not physical-device validation.
 - The app has 3D building extrusion, not 3D terrain. README documents that distinction.
 
 ## Non-negotiable product principles
@@ -31,20 +31,28 @@ The product should prioritize trustworthy routing, durable user data, understand
 6. Measured change: do not remove or combine features until their behavior, entry points, and user impact have been audited.
 7. Evidence before release: passing unit tests alone is insufficient; require emulator, artifact, and physical-device checks.
 
+## Current progress snapshot (2026-11-28)
+
+- P0.1 CI: passed on the current recorded head in run #236; repeat on any later commit before release.
+- P0.2 GPX segments: schema/import/export/rendering/profile implementation is present. Parser-level multi-segment round-trip, malformed-file rollback, empty-segment and multi-track cases still need direct tests.
+- P0.3 persistence/lifecycle: basic rollback and v1 migration coverage exists; v2-to-v3 migration and process/service lifecycle failure cases need explicit regression coverage.
+- Physical-device validation has not been performed as part of this repository workflow.
+- The open PR still contains pre-existing unrelated repository noise (macOS `.DS_Store` and a Python `__pycache__` bytecode file) that should be reviewed and removed from the PR diff before merge.
+
 ## Prioritized delivery plan
 
 ### P0 — Release integrity and data correctness
 
 **P0.1 Finish and stabilize CI**
-- Confirm workflow #228 terminal conclusion and artifact upload.
-- Fix failures at their source; do not skip, weaken, or mark required tests as optional to obtain green CI.
+- Confirm a successful workflow on the exact reviewed head and artifact upload (run #236 passed for commit `c490ae7`).
+- Repeat the workflow after subsequent changes; fix failures at their source; do not skip, weaken, or mark required tests as optional to obtain green CI.
 - Add bounded timeouts and useful diagnostics to long-running emulator/build steps.
 - Keep optional data visibly optional; mandatory map, search, graph, app compilation, and core tests must fail the build when invalid.
 
 Acceptance:
-- A fresh workflow completes successfully from the current branch head.
+- A fresh workflow completes successfully from the current branch head (run #236 passed on `c490ae7`; rerun after any later change).
 - Unit tests, Android instrumentation tests, map/graph/contour validation, APK assembly, and artifact upload all succeed.
-- The APK artifact can be downloaded and its package/version inspected.
+- The APK artifact is present; download/install and package/version inspection remain to be done.
 - The run SHA matches the reviewed branch head.
 
 **P0.2 Preserve GPX track and segment structure**
@@ -54,10 +62,10 @@ Acceptance:
 - Keep batch writes bounded and the whole import atomic.
 
 Acceptance:
-- A GPX containing one track with multiple segments imports as exactly one track with the original segment count and point order.
-- Export → import round-trip preserves track names, segment boundaries, coordinates, elevation, and timestamps within format precision.
-- Large GPX imports remain batched; malformed input rolls back all imported records.
-- v1 and v2 databases migrate without losing existing waypoints or track points.
+- A GPX containing one track with multiple segments imports as exactly one track with the original segment count and point order (implementation present; direct parser test outstanding).
+- Export → import round-trip preserves track names, segment boundaries, coordinates, elevation, and timestamps within format precision (not yet verified by an automated round-trip test).
+- Large GPX imports remain batched; malformed input rolls back all imported records (needs parser-level regression coverage).
+- v1 and v2 databases migrate without losing existing waypoints or track points (v1 is covered; add an explicit v2-to-v3 migration test).
 
 **P0.3 Expand persistence and lifecycle regression coverage**
 - Test migration paths, rollback, interrupted imports, empty segments, multiple tracks, large point batches, and recording service shutdown.
